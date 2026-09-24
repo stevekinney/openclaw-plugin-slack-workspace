@@ -66,6 +66,8 @@ describe("slack-workspace", () => {
       "slack_assistant_set_title",
       "slack_assistant_suggest_prompts",
       "slack_workflow_trigger_run",
+      "slack_usergroup_list",
+      "slack_usergroup_members",
     ]);
   });
 
