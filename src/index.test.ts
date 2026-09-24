@@ -16,6 +16,7 @@ describe("slack-workspace", () => {
       "slack_identity",
       "slack_search",
       "slack_schedule_message",
+      "slack_schedule_reschedule",
       "slack_remind",
       "slack_scheduled_list",
       "slack_scheduled_cancel",

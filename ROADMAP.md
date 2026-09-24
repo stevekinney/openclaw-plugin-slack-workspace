@@ -805,7 +805,7 @@ channel plugin does *not* already own — see **Not doing**, below).
   - Tests: mocked `conversations.open` + `chat.scheduleMessage` sequence.
   - Size: S
 
-- [ ] **R-02: Harden slack_schedule_message with Slack's documented limits** — `chat.scheduleMessage` enforces a 30-messages-per-5-minutes-per-channel cap (`restricted_too_many`) not currently surfaced anywhere; there's also no edit-scheduled-message method, only delete+recreate.
+- [x] **R-02: Harden slack_schedule_message with Slack's documented limits** — `chat.scheduleMessage` enforces a 30-messages-per-5-minutes-per-channel cap (`restricted_too_many`) not currently surfaced anywhere; there's also no edit-scheduled-message method, only delete+recreate.
   - Why: callers hit a rate-limit wall with no warning, and rescheduling requires two manual tool calls today.
   - Scope(s) & token type: `chat:write`, bot token (existing).
   - API methods: `chat.scheduleMessage` (Tier 3), `chat.deleteScheduledMessage`.
@@ -814,6 +814,8 @@ channel plugin does *not* already own — see **Not doing**, below).
   - Acceptance criteria: the tool description and error hints name the 30-per-5-minutes-per-channel cap; a new `slack_schedule_reschedule` tool does cancel+recreate in one call.
   - Tests: mocked `restricted_too_many` response asserting a clear hint; mocked reschedule sequence.
   - Size: S
+  - Done (2026-09-24): `restricted_too_many` now carries a hint naming the 30-per-5-minutes-per-channel cap (`src/client.ts`), and `slack_schedule_message`'s description states it. New `slack_schedule_reschedule(channelId, scheduledMessageId, text, postAt, blocks?, threadTs?)` schedules the replacement first, then cancels the original; if the cancel fails it withdraws the replacement, so a failure never leaves two copies or loses the original.
+  - Live verification pending: reschedule a real pending message on `lostgradient` and confirm only the replacement posts.
 
 ---
 
