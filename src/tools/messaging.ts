@@ -15,6 +15,62 @@ const richText = (text: string) => ({
   elements: [{ type: "rich_text_section", elements: [{ type: "text", text }] }],
 });
 
+/** Escape the three characters Slack treats as control sequences, so data can't @-mention. */
+const escapeText = (text: string) =>
+  text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/** Show the first `limit` items, then note how many were cut. */
+const truncated = (items: string[], limit: number, noun = "") =>
+  items.length > limit
+    ? [...items.slice(0, limit), `…and ${items.length - limit} more${noun}`]
+    : items;
+
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+
+/**
+ * `text` is what notifications show and what search indexes for block-only
+ * messages, so give it real data rather than just the caption.
+ */
+function tableFallback(caption: string, columns: string[], rows: (string | number)[][]) {
+  const lines = rows.map((row) =>
+    row.map((cell, index) => `${columns[index]}: ${cell}`).join(", "),
+  );
+  return escapeText(
+    [`${caption} (${plural(rows.length, "row")})`, ...truncated(lines, 3, " rows")].join("\n"),
+  );
+}
+
+function chartFallback(
+  title: string,
+  chartType: string,
+  data:
+    | { segments: { label: string; value: number }[] }
+    | { categories: string[]; series: { name: string; values: number[] }[] },
+) {
+  const lines =
+    "segments" in data
+      ? [
+          truncated(
+            [...data.segments]
+              .sort((a, b) => b.value - a.value)
+              .map((segment) => `${segment.label}: ${segment.value}`),
+            5,
+          ).join(", "),
+        ]
+      : truncated(
+          data.series.map(
+            (entry) =>
+              `${entry.name}: ${truncated(
+                entry.values.map((value, index) => `${data.categories[index]} ${value}`),
+                8,
+              ).join(", ")}`,
+          ),
+          5,
+          " series",
+        );
+  return escapeText([`${title} (${chartType} chart)`, ...lines].join("\n"));
+}
+
 async function postOrUpdate(
   config: PluginConfig,
   args: {
@@ -104,7 +160,13 @@ export const messagingTools = (tool: ToolFactory) => [
       if (pageSize) table.page_size = pageSize;
       return postOrUpdate(
         config,
-        { channelId, text: caption, blocks: [table], threadTs, updateTs },
+        {
+          channelId,
+          text: tableFallback(caption, columns, rows),
+          blocks: [table],
+          threadTs,
+          updateTs,
+        },
         context,
       );
     },
@@ -225,10 +287,12 @@ export const messagingTools = (tool: ToolFactory) => [
       context.signal?.throwIfAborted();
       const { channelId, title, chartType, segments, categories, series, xLabel, yLabel } = args;
       let chart: Record<string, unknown>;
+      let text: string;
 
       if (chartType === "pie") {
         if (!segments?.length) throw new Error("A pie chart requires `segments`.");
         chart = { type: "pie", segments };
+        text = chartFallback(title, chartType, { segments });
       } else {
         if (!categories?.length || !series?.length) {
           throw new Error(`A ${chartType} chart requires both \`categories\` and \`series\`.`);
@@ -260,13 +324,14 @@ export const messagingTools = (tool: ToolFactory) => [
             ...(yLabel ? { y_label: yLabel } : {}),
           },
         };
+        text = chartFallback(title, chartType, { categories, series });
       }
 
       return postOrUpdate(
         config,
         {
           channelId,
-          text: title,
+          text,
           blocks: [{ type: "data_visualization", title, chart }],
           threadTs: args.threadTs,
           updateTs: args.updateTs,

@@ -131,6 +131,38 @@ describe("slack_post_table", () => {
       },
     );
   });
+
+  it("builds a plain-text fallback from the first rows, not just the caption", async () => {
+    await withMockFetch(ok, async (calls) => {
+      await runTool("slack_post_table", {
+        ...target,
+        caption: "Scores",
+        columns: ["name", "score"],
+        rows: [
+          ["ada", 91],
+          ["bob", 78],
+          ["cy", 85],
+          ["dee", 60],
+          ["eve", 99],
+        ],
+      });
+      expect(calls[0].body.text).toBe(
+        "Scores (5 rows)\nname: ada, score: 91\nname: bob, score: 78\nname: cy, score: 85\n…and 2 more rows",
+      );
+    });
+  });
+
+  it("escapes Slack control characters in the fallback so cells cannot trigger mentions", async () => {
+    await withMockFetch(ok, async (calls) => {
+      await runTool("slack_post_table", {
+        ...target,
+        caption: "A & B",
+        columns: ["who"],
+        rows: [["<!channel>"]],
+      });
+      expect(calls[0].body.text).toBe("A &amp; B (1 row)\nwho: &lt;!channel&gt;");
+    });
+  });
 });
 
 describe("slack_post_plan", () => {
@@ -178,6 +210,46 @@ describe("slack_post_chart", () => {
         runTool("slack_post_chart", { ...target, title: "Trend", chartType: "line", categories: ["Q1"] }),
       ).rejects.toThrow("A line chart requires both `categories` and `series`.");
       expect(calls).toHaveLength(0);
+    });
+  });
+
+  it("builds a fallback listing the largest pie segments with their values", async () => {
+    await withMockFetch(ok, async (calls) => {
+      await runTool("slack_post_chart", {
+        ...target,
+        title: "Traffic",
+        chartType: "pie",
+        segments: [
+          { label: "a", value: 5 },
+          { label: "b", value: 40 },
+          { label: "c", value: 10 },
+          { label: "d", value: 30 },
+          { label: "e", value: 1 },
+          { label: "f", value: 20 },
+          { label: "g", value: 2 },
+        ],
+      });
+      expect(calls[0].body.text).toBe(
+        "Traffic (pie chart)\nb: 40, d: 30, f: 20, c: 10, a: 5, …and 2 more",
+      );
+    });
+  });
+
+  it("builds a fallback listing each series' values by category", async () => {
+    await withMockFetch(ok, async (calls) => {
+      await runTool("slack_post_chart", {
+        ...target,
+        title: "Revenue",
+        chartType: "bar",
+        categories: ["Q1", "Q2", "Q3"],
+        series: [
+          { name: "2025", values: [1, 2, 3] },
+          { name: "2026", values: [4, 5, 6.5] },
+        ],
+      });
+      expect(calls[0].body.text).toBe(
+        "Revenue (bar chart)\n2025: Q1 1, Q2 2, Q3 3\n2026: Q1 4, Q2 5, Q3 6.5",
+      );
     });
   });
 });
