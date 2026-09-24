@@ -94,6 +94,11 @@ Verified to render in messages: `header`, `section` (with `fields`), `rich_text`
 
 `alert` is **modals only** and will not render in a message.
 
+To let a user rate an answer 👍/👎, add a `context_actions` block with
+`feedback_buttons` under it. The JSON is under "Feedback buttons" in
+`references/block-kit.md`. It hasn't been live-verified yet, and this plugin
+doesn't receive the clicks.
+
 Two that differ from expectation:
 
 - `markdown` blocks take **standard markdown** (`**bold**`, `[text](url)`, `- item`),
