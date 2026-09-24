@@ -4,6 +4,27 @@ import type { ApprovalRule } from "../approvals.js";
 import { cursorParams, toPage, walkPages } from "../pagination.js";
 import { blocksSchema, channelIdParam, threadTsParam, type ToolFactory } from "../schemas.js";
 
+// A time followed by `Z` or a numeric offset (`-06:00`, `+0530`, `+05`).
+const explicitOffset = /\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?\s*(?:Z|[+-]\d{2}(?::?\d{2})?)$/i;
+
+const parsePostAt = (postAt: string | number): number => {
+  if (typeof postAt === "number") return Math.floor(postAt);
+  const value = postAt.trim();
+  // JSON callers often stringify Unix seconds; Date.parse would return NaN for these.
+  if (/^\d+(?:\.\d+)?$/.test(value)) return Math.floor(Number(value));
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms)) {
+    throw new Error(`Could not read \`postAt\` (${postAt}) as ISO-8601 or Unix seconds.`);
+  }
+  // Without an offset, Date.parse falls back to the OpenClaw host's local timezone.
+  if (!explicitOffset.test(value)) {
+    throw new Error(
+      `\`postAt\` (${postAt}) has no timezone, so it is ambiguous. Add \`Z\` or an offset like \`-06:00\`, or pass Unix seconds.`,
+    );
+  }
+  return Math.floor(ms / 1000);
+};
+
 export const schedulingTools = (tool: ToolFactory) => [
   tool({
     name: "slack_schedule_message",
@@ -15,7 +36,7 @@ export const schedulingTools = (tool: ToolFactory) => [
       text: Type.String({ description: "Message text, or the fallback when blocks are set." }),
       postAt: Type.Union([Type.String(), Type.Number()], {
         description:
-          'When to post: an ISO-8601 datetime ("2026-09-23T09:00:00-06:00") or Unix seconds. Must be in the future and within 120 days.',
+          'When to post: an ISO-8601 datetime with an explicit offset ("2026-09-23T09:00:00-06:00" or "…Z") or Unix seconds (number or all-digit string). Datetimes without an offset are rejected as ambiguous. Must be in the future and within 120 days.',
       }),
       blocks: Type.Optional(blocksSchema),
       threadTs: threadTsParam,
@@ -32,11 +53,7 @@ export const schedulingTools = (tool: ToolFactory) => [
     async execute({ channelId, text, postAt, blocks, threadTs }, config, context) {
       context.signal?.throwIfAborted();
 
-      const seconds =
-        typeof postAt === "number" ? Math.floor(postAt) : Math.floor(Date.parse(postAt) / 1000);
-      if (!Number.isFinite(seconds)) {
-        throw new Error(`Could not read \`postAt\` (${postAt}) as ISO-8601 or Unix seconds.`);
-      }
+      const seconds = parsePostAt(postAt);
       const now = Math.floor(Date.now() / 1000);
       if (seconds <= now) {
         throw new Error(

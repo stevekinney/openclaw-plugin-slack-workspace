@@ -232,6 +232,46 @@ describe("slack_schedule_message postAt bounds", () => {
     });
   });
 
+  it("treats an all-digit string as Unix seconds", async () => {
+    const postAt = nowSeconds + day;
+    await withMockFetch(
+      () => ({ ok: true, scheduled_message_id: "Q0TEST" }),
+      async (calls) => {
+        await expect(schedule(String(postAt))).resolves.toMatchObject({
+          postAt,
+          postAtIso: "2026-09-24T12:00:00.000Z",
+        });
+        expect(calls[0].body.post_at).toBe(postAt);
+      },
+    );
+  });
+
+  it("rejects an ISO datetime without a timezone offset", async () => {
+    await withMockFetch(ok, async (calls) => {
+      await expect(schedule("2026-09-24T09:00:00")).rejects.toThrow(
+        "`postAt` (2026-09-24T09:00:00) has no timezone, so it is ambiguous. Add `Z` or an offset like `-06:00`, or pass Unix seconds.",
+      );
+      await expect(schedule("2026-09-24")).rejects.toThrow("has no timezone");
+      expect(calls).toHaveLength(0);
+    });
+  });
+
+  it("accepts ISO datetimes with Z or a numeric offset", async () => {
+    await withMockFetch(
+      () => ({ ok: true, scheduled_message_id: "Q0TEST" }),
+      async (calls) => {
+        await schedule("2026-09-24T09:00:00Z");
+        await schedule("2026-09-24T09:00:00.000-06:00");
+        await schedule("2026-09-24T09:00:00+0530");
+        expect(calls.map((call) => call.body.post_at)).toEqual([
+          Date.parse("2026-09-24T09:00:00Z") / 1000,
+          Date.parse("2026-09-24T15:00:00Z") / 1000,
+          Date.parse("2026-09-24T03:30:00Z") / 1000,
+        ]);
+      },
+    );
+  });
+
   it("schedules exactly 120 days out", async () => {
     const postAt = nowSeconds + 120 * day;
     await withMockFetch(
