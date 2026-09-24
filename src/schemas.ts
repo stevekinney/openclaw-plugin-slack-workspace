@@ -26,6 +26,23 @@ export const configSchema = Type.Object(
   { additionalProperties: false },
 );
 
+/**
+ * Output shaping convention. Every tool declares an `outputSchema`, and a tool
+ * that returns Slack data picks one of two shapes:
+ *
+ * - Curate (the default): map Slack's object to the few fields the agent acts on,
+ *   in camelCase, with `additionalProperties: false`. Do this whenever the raw
+ *   object is large or noisy, or carries fields the agent has no use for
+ *   (ranks, audit user/team IDs, icon URLs, rendering internals). Examples:
+ *   `slack_search`, `slack_scheduled_list`, `slack_bookmark_*`, `slack_canvas_sections`.
+ * - Pass through: return Slack's value verbatim, typed `Type.Unknown()` or a
+ *   string-keyed record, only when it is small and every field is useful, or when
+ *   its structure is the point (e.g. Slack's `paging` object). Say so in the schema.
+ *
+ * Curated fields keep Slack's values but drop empty ones Slack uses as "unset"
+ * (e.g. `emoji: ""`) by omitting the key.
+ */
+
 /** Each domain module takes the `defineTool` helper and returns its tool definitions. */
 export type { ToolFactory } from "./tool.js";
 

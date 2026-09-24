@@ -3,8 +3,30 @@ import { callSlack, resolveToken } from "../client.js";
 import type { ApprovalRule } from "../approvals.js";
 import { channelIdParam, type ToolFactory } from "../schemas.js";
 
-/** Slack's bookmark object, passed through as-is (id, title, link, emoji, ...). */
-const slackBookmark = Type.Record(Type.String(), Type.Unknown());
+/** Curated bookmark (see "Output shaping" in schemas.ts): Slack's carries ~15 bookkeeping fields. */
+const slackBookmark = Type.Object(
+  {
+    id: Type.String(),
+    title: Type.String(),
+    link: Type.String(),
+    emoji: Type.Optional(Type.String()),
+    type: Type.String(),
+  },
+  { additionalProperties: false },
+);
+
+type RawBookmark = Record<string, unknown>;
+
+function curateBookmark(raw: RawBookmark) {
+  return {
+    id: String(raw.id ?? ""),
+    title: String(raw.title ?? ""),
+    link: String(raw.link ?? ""),
+    // Slack sends emoji:"" for bookmarks without one; drop it rather than echo noise.
+    ...(typeof raw.emoji === "string" && raw.emoji ? { emoji: raw.emoji } : {}),
+    type: String(raw.type ?? ""),
+  };
+}
 
 export const bookmarkTools = (tool: ToolFactory) => [
   tool({
@@ -27,7 +49,7 @@ export const bookmarkTools = (tool: ToolFactory) => [
         { channel_id: channelId },
         context,
       );
-      return { bookmarks: data.bookmarks ?? [] };
+      return { bookmarks: ((data.bookmarks ?? []) as RawBookmark[]).map(curateBookmark) };
     },
   }),
 
@@ -56,7 +78,7 @@ export const bookmarkTools = (tool: ToolFactory) => [
       };
       if (emoji) body.emoji = emoji;
       const data = await callSlack("bookmarks.add", token, body, context);
-      return { bookmark: data.bookmark ?? null };
+      return { bookmark: data.bookmark ? curateBookmark(data.bookmark as RawBookmark) : null };
     },
   }),
 
