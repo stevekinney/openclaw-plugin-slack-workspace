@@ -6,20 +6,25 @@ const secretRefSchema = Type.Object({
   id: Type.String(),
 });
 
-export const configSchema = Type.Object({
-  botToken: Type.Optional(
-    Type.Union([Type.String(), secretRefSchema], {
-      description:
-        "Slack bot token (xoxb-) or a SecretRef ({source,provider,id}). Falls back to SLACK_BOT_TOKEN.",
-    }),
-  ),
-  userToken: Type.Optional(
-    Type.Union([Type.String(), secretRefSchema], {
-      description:
-        "Slack user token (xoxp-) or a SecretRef. Required by search and reminders, which reject bot tokens. Falls back to SLACK_USER_TOKEN.",
-    }),
-  ),
-});
+export const configSchema = Type.Object(
+  {
+    botToken: Type.Optional(
+      Type.Union([Type.String(), secretRefSchema], {
+        description:
+          "Slack bot token (xoxb-) or a SecretRef ({source,provider,id}). Falls back to SLACK_BOT_TOKEN.",
+      }),
+    ),
+    userToken: Type.Optional(
+      Type.Union([Type.String(), secretRefSchema], {
+        description:
+          "Slack user token (xoxp-) or a SecretRef. Required by search, which rejects bot tokens. Falls back to SLACK_USER_TOKEN.",
+      }),
+    ),
+  },
+  // Reject typo'd keys (e.g. `boToken`) at validation time instead of failing
+  // later with a confusing "No Slack bot token" error.
+  { additionalProperties: false },
+);
 
 /** Each domain module takes the `defineTool` helper and returns its tool definitions. */
 export type { ToolFactory } from "./tool.js";

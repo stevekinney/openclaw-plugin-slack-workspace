@@ -1,7 +1,7 @@
 {
   "id": "slack-workspace",
   "name": "Slack Workspace",
-  "description": "Create and edit Slack canvases and manage channel bookmarks.",
+  "description": "Slack workspace tools: identity and message scheduling, search, structured messaging (tables, plans, charts), raw Block Kit messages, canvases, and channel bookmarks.",
   "version": "0.1.0",
   "configSchema": {
     "type": "object",
@@ -56,9 +56,10 @@
             }
           }
         ],
-        "description": "Slack user token (xoxp-) or a SecretRef. Required by search and reminders, which reject bot tokens. Falls back to SLACK_USER_TOKEN."
+        "description": "Slack user token (xoxp-) or a SecretRef. Required by search, which rejects bot tokens. Falls back to SLACK_USER_TOKEN."
       }
-    }
+    },
+    "additionalProperties": false
   },
   "activation": {
     "onStartup": true
