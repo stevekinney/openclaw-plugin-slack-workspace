@@ -59,6 +59,15 @@ doesn't expand into a preview. Pass `unfurlLinks: true` or `unfurlMedia: true` w
 you want the preview. Both are ignored with `updateTs`: an edit keeps the original
 post's unfurl behavior.
 
+## Message metadata
+
+All four tools and `slack_blocks_update` accept an optional
+`metadata: { eventType, eventPayload }`, sent as Slack's `metadata` field. Use it to
+stamp a card with a machine-readable id (task id, revision) so it can be found later
+without parsing its text. Slack silently drops metadata whose `eventType` isn't
+registered under the app manifest's `metadata.event_subscriptions`: the post still
+succeeds, just without the metadata.
+
 ## Raw blocks
 
 `slack_blocks_send` passes `blocks` to Slack verbatim. `text` is required — it is the

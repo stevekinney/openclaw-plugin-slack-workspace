@@ -408,6 +408,41 @@ describe("reply broadcast on structured posts", () => {
   });
 });
 
+describe("message metadata on posts", () => {
+  const table = { ...target, caption: "T", columns: ["a"], rows: [["1"]] };
+  const plan = { ...target, title: "P", tasks: [{ title: "x", status: "pending" }] };
+  const chart = { ...target, title: "C", chartType: "pie", segments: [{ label: "a", value: 1 }] };
+  const blocks = { ...target, text: "t", blocks: [{ type: "divider" }] };
+  const update = { ...blocks, ts: "1700000000.000100" };
+  const metadata = { eventType: "openclaw_card_v1", eventPayload: { taskId: "T-1", revision: 2 } };
+  const wire = { event_type: "openclaw_card_v1", event_payload: { taskId: "T-1", revision: 2 } };
+
+  const cases: [string, Record<string, unknown>, string][] = [
+    ["slack_post_table", table, "chat.postMessage"],
+    ["slack_post_plan", plan, "chat.postMessage"],
+    ["slack_post_chart", chart, "chat.postMessage"],
+    ["slack_post_table", { ...table, updateTs: "1700000000.000100" }, "chat.update"],
+    ["slack_blocks_send", blocks, "chat.postMessage"],
+    ["slack_blocks_update", update, "chat.update"],
+  ];
+
+  it.each(cases)("%s forwards metadata (case %#)", async (name, args, method) => {
+    await withMockFetch(ok, async (calls) => {
+      await runTool(name, { ...args, metadata });
+      expect(calls[0].method).toBe(method);
+      expect(calls[0].body.metadata).toEqual(wire);
+    });
+  });
+
+  it.each(cases)("%s omits metadata when unset (case %#)", async (name, args, method) => {
+    await withMockFetch(ok, async (calls) => {
+      await runTool(name, args);
+      expect(calls[0].method).toBe(method);
+      expect(calls[0].body).not.toHaveProperty("metadata");
+    });
+  });
+});
+
 describe("slack_schedule_message postAt bounds", () => {
   const now = new Date("2026-09-23T12:00:00Z");
   const nowSeconds = Math.floor(now.getTime() / 1000);

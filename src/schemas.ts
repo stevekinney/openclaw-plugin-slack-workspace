@@ -106,6 +106,38 @@ export const replyBroadcastParam = Type.Optional(
   }),
 );
 
+/**
+ * Machine-readable data stamped on a message (`chat.postMessage`/`chat.update` `metadata`).
+ * Slack silently drops metadata whose `event_type` isn't registered under the app
+ * manifest's `metadata.event_subscriptions` — the call still returns `ok: true`.
+ */
+export const metadataParam = Type.Optional(
+  Type.Object(
+    {
+      eventType: Type.String({
+        pattern: "^[A-Za-z0-9_]+$",
+        maxLength: 255,
+        description:
+          "Event type name, e.g. \"openclaw_card_v1\". Must be registered in the Slack app manifest's metadata.event_subscriptions, or Slack silently discards the metadata.",
+      }),
+      eventPayload: Type.Record(Type.String(), Type.Unknown(), {
+        description: "JSON object to attach, e.g. {\"taskId\":\"T-1\",\"revision\":2}.",
+      }),
+    },
+    {
+      additionalProperties: false,
+      description:
+        "Optional machine-readable payload stamped on the message so it can be found and reconstructed later without parsing its text. Not shown to readers.",
+    },
+  ),
+);
+
+/** Slack's wire shape for `metadataParam`. */
+export const toSlackMetadata = (metadata: { eventType: string; eventPayload: Record<string, unknown> }) => ({
+  event_type: metadata.eventType,
+  event_payload: metadata.eventPayload,
+});
+
 /** Where a structured post lands: a channel, optionally a thread, optionally in place. */
 export const targetParams = {
   channelId: channelIdParam(),
@@ -118,6 +150,7 @@ export const targetParams = {
     }),
   ),
   ...unfurlParams,
+  metadata: metadataParam,
 };
 
 export const postResultSchema = Type.Object(
