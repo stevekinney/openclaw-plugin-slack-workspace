@@ -1,5 +1,6 @@
 import { bookmarkApprovals } from "./tools/bookmarks.js";
 import { canvasApprovals } from "./tools/canvases.js";
+import { channelApprovals } from "./tools/channels.js";
 import { schedulingApprovals } from "./tools/scheduling.js";
 
 const PLUGIN_ID = "slack-workspace";
@@ -38,6 +39,7 @@ export const APPROVAL_RULES: readonly ApprovalRule[] = [
   ...schedulingApprovals,
   ...canvasApprovals,
   ...bookmarkApprovals,
+  ...channelApprovals,
 ];
 
 /** The approval request for this call, or `undefined` if no rule gates it. */

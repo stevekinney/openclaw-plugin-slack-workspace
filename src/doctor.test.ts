@@ -15,6 +15,10 @@ const BOT_SCOPES = [
   "canvases:write",
   "bookmarks:read",
   "bookmarks:write",
+  "channels:read",
+  "channels:manage",
+  "channels:write.topic",
+  "channels:write.invites",
 ];
 const USER_SCOPES = ["search:read"];
 
@@ -55,6 +59,10 @@ describe("auditScopes", () => {
           "bookmarks:write",
           "canvases:read",
           "canvases:write",
+          "channels:manage",
+          "channels:read",
+          "channels:write.invites",
+          "channels:write.topic",
           "chat:write",
         ],
       });

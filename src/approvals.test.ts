@@ -45,6 +45,12 @@ const gated: Array<[string, Record<string, unknown>, string]> = [
     { channelId: "C0TEST", scheduledMessageId: "Q0TEST" },
     "chat.deleteScheduledMessage",
   ],
+  ["slack_channel_archive", { channelId: "C0TEST", confirm: true }, "conversations.archive"],
+  [
+    "slack_channel_rename",
+    { channelId: "C0TEST", name: "renamed", confirm: true },
+    "conversations.rename",
+  ],
 ];
 
 describe("approval registry", () => {
@@ -52,6 +58,8 @@ describe("approval registry", () => {
     expect(APPROVAL_RULES.map((rule) => rule.toolName).sort()).toEqual([
       "slack_bookmark_remove",
       "slack_canvas_edit",
+      "slack_channel_archive",
+      "slack_channel_rename",
       "slack_scheduled_cancel",
     ]);
   });
@@ -114,9 +122,14 @@ describe("approval registry", () => {
   });
 });
 
-/** Slack methods called, minus the read-only `auth.test` canvas tools use to build URLs. */
+/**
+ * Slack methods called, minus the read-only lookups: `auth.test` (canvas URLs) and
+ * `conversations.info` (the channel tools' public-channel check).
+ */
 const writes = (calls: RecordedCall[]) =>
-  calls.map((call) => call.method).filter((method) => method !== "auth.test");
+  calls
+    .map((call) => call.method)
+    .filter((method) => method !== "auth.test" && method !== "conversations.info");
 
 describe("before_tool_call approvals", () => {
   it.each(gated)("a denied %s never reaches Slack", async (toolName, params) => {

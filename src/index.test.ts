@@ -29,6 +29,12 @@ describe("slack-workspace", () => {
       "slack_bookmark_list",
       "slack_bookmark_add",
       "slack_bookmark_remove",
+      "slack_channel_create",
+      "slack_channel_archive",
+      "slack_channel_rename",
+      "slack_channel_set_topic",
+      "slack_channel_set_purpose",
+      "slack_channel_invite",
     ]);
   });
 
