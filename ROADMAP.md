@@ -591,7 +591,8 @@ matching the Canvases tier's C-06/C-07.
   - Tests: mocked set and delete calls.
   - Size: S
 
-- [ ] **L-07: Spike — Lists discovery** — Confirm whether a Lists analog of `files.list` exists for discovering all Lists in a workspace/channel; the 12-method Lists API inventory found during research showed no list-all/search method.
+- [x] **L-07: Spike — Lists discovery** — Confirm whether a Lists analog of `files.list` exists for discovering all Lists in a workspace/channel; the 12-method Lists API inventory found during research showed no list-all/search method.
+  - **Finding (2026-09-24): no discovery method exists; callers must use already-known IDs, with `search.files` as an unverified best-effort fallback.** The documented `slackLists.*` family is exactly 12 methods (`create`, `update`, `access.set`/`.delete`, `download.start`/`.get`, `items.create`/`.update`/`.delete`/`.deleteMultiple`/`.info`/`.list`), none of which enumerates Lists. `files.list`'s documented `types` filter (`all`, `spaces`, `snippets`, `images`, `gdocs`, `zips`, `pdfs`) has no Lists value. No `slack_list_discovery` tool ships; recorded in `skills/slack-lists/SKILL.md` and under **Not doing**. UNVERIFIED (needs a live check): whether Lists appear in unfiltered `files.list` or `search.files` results as file objects — if they reliably do, reopen as a small tool task.
   - Why: without discovery, every Lists tool above requires the caller to already know a `list_id`.
   - Scope(s) & token type: `lists:read`, bot or user token.
   - API methods: TBD — spike output.
@@ -1110,6 +1111,10 @@ Recorded so a future pass through this backlog doesn't re-propose them:
   both **O-01** and a documented forwarding mechanism from the channel
   plugin that doesn't exist today — track as a future cross-plugin
   architecture question, not a task on this list.
+- **A `slack_list_discovery` tool (L-07).** Slack has no documented method
+  that enumerates Lists in a workspace or channel. Callers must already know a
+  `list_id` (from `slack_list_create` or a shared link); `search.files` may
+  surface Lists by name, but that's unverified pending a live check.
 - **Pins, reactions, emoji list, member info, in-turn file upload/download,
   conversation-open for ordinary chat, assistant thread status.** All
   already owned by the bundled Slack channel plugin.
