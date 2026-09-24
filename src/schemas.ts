@@ -20,6 +20,17 @@ export const configSchema = Type.Object(
           "Slack user token (xoxp-) or a SecretRef. Required by search, which rejects bot tokens. Falls back to SLACK_USER_TOKEN.",
       }),
     ),
+    autoJoin: Type.Optional(
+      Type.Boolean({
+        description:
+          "When a bot-token call fails with not_in_channel on a public channel, join it once and retry. Default true.",
+      }),
+    ),
+    autoJoinDeny: Type.Optional(
+      Type.Array(Type.String(), {
+        description: "Channel IDs the bot must never auto-join, e.g. [\"C0123ABCD\"].",
+      }),
+    ),
   },
   // Reject typo'd keys (e.g. `boToken`) at validation time instead of failing
   // later with a confusing "No Slack bot token" error.
