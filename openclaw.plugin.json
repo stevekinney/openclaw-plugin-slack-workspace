@@ -144,7 +144,8 @@
       "slack_list_items_list",
       "slack_list_item_info",
       "slack_list_access_set",
-      "slack_list_access_delete"
+      "slack_list_access_delete",
+      "slack_list_from_thread"
     ]
   },
   "toolMetadata": {
@@ -438,6 +439,13 @@
     "slack_list_access_delete": {
       "sideEffecting": true,
       "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_list_from_thread": {
+      "sideEffecting": true,
+      "replaySafe": false,
       "profiles": [
         "messaging"
       ]

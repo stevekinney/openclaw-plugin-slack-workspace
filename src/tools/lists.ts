@@ -7,10 +7,13 @@ import {
   accessTargetParams,
   assertAccessLevel,
   slackAccessTarget,
+  type AccessLevel,
+  type AccessTarget,
 } from "../access.js";
 import type { ApprovalRule } from "../approvals.js";
 import { cursorParams, toPage, walkPages } from "../pagination.js";
-import type { ToolFactory } from "../schemas.js";
+import { channelIdParam, type ToolFactory } from "../schemas.js";
+import { fetchThread, type ThreadMessage } from "./canvases.js";
 
 /** Column types `slackLists.create` accepts in a `schema`. */
 const COLUMN_TYPES = [
@@ -316,6 +319,134 @@ function curateItem(raw: RawItem) {
     ...(present(raw.updated_timestamp) ? { updatedAt: String(raw.updated_timestamp) } : {}),
     fields: fields.map(curateField),
   };
+}
+
+/** One row `slack_list_from_thread` writes: the task, plus an owner and due date if known. */
+export type ActionItem = { task: string; assignee?: string; dueDate?: string };
+
+const CHECKLIST = /^(?:[-*•◦]\s*)?\[ \]\s*(.+)$/;
+const DONE = /^(?:[-*•◦]\s*)?\[[xX]\]/;
+const PREFIXED = /^(?:[-*•◦]\s+)?[*_]*(?:todo|action items?|action|next step)[*_]*\s*:[*_]*\s*(.+)$/i;
+const BULLET = /^(?:[-*•◦]|\d+[.)])\s+(.+)$/;
+const BLOCK_PHRASE = String.raw`(?:action items?|next steps|to-?dos?)`;
+/** "Action items:" ending a line, or the phrase alone on its line, starts a bulleted block. */
+const BLOCK_HEADING = new RegExp(
+  String.raw`(?:(?:^|[\s*_])${BLOCK_PHRASE}[*_]*\s*:[*_]*|^[*_]*${BLOCK_PHRASE}[*_]*)\s*$`,
+  "i",
+);
+const MENTION = /<@([UW][A-Z0-9]+)(?:\|[^>]*)?>/;
+
+/**
+ * Pull candidate action items out of a thread, one per line: open checklist entries
+ * (`- [ ] …`), lines prefixed `TODO:` or `Action item:`, and bullets under an
+ * "Action items:" / "Next steps:" heading. The first mention in an item is its
+ * assignee. Repeats are dropped. The text stays Slack mrkdwn; `richTextCell` renders it.
+ */
+export function extractActionItems(messages: ThreadMessage[]): ActionItem[] {
+  const items: ActionItem[] = [];
+  const seen = new Set<string>();
+  const add = (task: string) => {
+    const trimmed = task.trim();
+    const key = trimmed.toLowerCase();
+    if (!trimmed || seen.has(key)) return;
+    seen.add(key);
+    const assignee = MENTION.exec(trimmed)?.[1];
+    items.push({ task: trimmed, ...(assignee ? { assignee } : {}) });
+  };
+  for (const message of messages) {
+    let inBlock = false;
+    for (const raw of message.text.split("\n")) {
+      const line = raw.trim();
+      if (!line) continue;
+      if (DONE.test(line)) continue;
+      const match = CHECKLIST.exec(line) ?? PREFIXED.exec(line);
+      if (match) {
+        add(match[1]!);
+      } else if (BLOCK_HEADING.test(line)) {
+        inBlock = true;
+        continue;
+      } else if (inBlock && BULLET.test(line)) {
+        add(BULLET.exec(line)![1]!);
+      } else {
+        inBlock = false;
+      }
+    }
+  }
+  return items;
+}
+
+const decodeEntities = (text: string) =>
+  text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+
+/**
+ * A text cell from Slack mrkdwn: `<@U…>` and `<#C…>` become real mentions, `<url|label>`
+ * a link, and `<!here>`-style broadcasts plain text, so nothing notifies from a List.
+ */
+export function richTextCell(columnId: string, text: string): Record<string, unknown> {
+  const elements: Record<string, unknown>[] = [];
+  const pushText = (segment: string) => {
+    if (segment) elements.push({ type: "text", text: decodeEntities(segment) });
+  };
+  const token = /<([@#!]?)([^|>]+)(?:\|([^>]*))?>/g;
+  let last = 0;
+  for (const match of text.matchAll(token)) {
+    pushText(text.slice(last, match.index));
+    last = match.index + match[0].length;
+    const [, sigil, target, label] = match;
+    if (sigil === "@") elements.push({ type: "user", user_id: target });
+    else if (sigil === "#") elements.push({ type: "channel", channel_id: target });
+    else if (sigil === "!") pushText(label ?? `@${target}`);
+    else elements.push({ type: "link", url: target, ...(label ? { text: decodeEntities(label) } : {}) });
+  }
+  pushText(text.slice(last));
+  return {
+    column_id: columnId,
+    rich_text: [{ type: "rich_text", elements: [{ type: "rich_text_section", elements }] }],
+  };
+}
+
+/** The columns an action-item row fills: the task text, and the todo columns when present. */
+function actionItemColumns(columns: ListColumn[], listId: string) {
+  const task = columns.find((column) => column.primary) ?? columns.find((column) => column.type === "text");
+  if (!task) throw new Error(`List ${listId} has no text column to hold the task.`);
+  return {
+    task,
+    assignee: columns.find((column) => column.type === "todo_assignee"),
+    dueDate: columns.find((column) => column.type === "todo_due_date"),
+  };
+}
+
+/**
+ * Share a list that already exists. A failure is reported, not thrown: the list is
+ * there either way, and the caller still needs its ID to retry sharing or clean up.
+ */
+async function shareList(
+  token: string,
+  listId: string,
+  target: AccessTarget | undefined,
+  accessLevel: AccessLevel,
+  context: SlackCallContext,
+): Promise<{ sharedWith: string[] | null; shareError?: string }> {
+  if (!target) return { sharedWith: null };
+  try {
+    await callSlack(
+      "slackLists.access.set",
+      token,
+      { list_id: listId, ...slackAccessTarget(target), access_level: accessLevel },
+      context,
+    );
+  } catch (error) {
+    // Cancellation isn't a share failure: honor it rather than returning a result.
+    context.signal?.throwIfAborted();
+    return { sharedWith: null, shareError: error instanceof Error ? error.message : String(error) };
+  }
+  return { sharedWith: "channelIds" in target ? target.channelIds : target.userIds };
+}
+
+/** A thread's date from its parent `ts`, e.g. `2024-09-10`. */
+function threadDate(ts: string) {
+  const date = new Date(Number(ts) * 1000);
+  return Number.isNaN(date.getTime()) ? ts : date.toISOString().slice(0, 10);
 }
 
 export const listTools = (tool: ToolFactory) => [
@@ -657,6 +788,152 @@ export const listTools = (tool: ToolFactory) => [
         context,
       );
       return { listId, revoked: true as const, ...target };
+    },
+  }),
+  tool({
+    name: "slack_list_from_thread",
+    label: "Create Slack list from thread",
+    description:
+      "Turn a Slack thread's action items into List rows: fetch every message, pick out open checklist entries, TODO:/Action item: lines, and bullets under an \"Action items:\" or \"Next steps:\" heading (or take the items you pass), then add one row per item to a new to-do List or to listId. A mention in an item becomes its assignee. A new list is shared with the thread's channel unless channelIds or userIds say otherwise; an existing one is shared only when they are set. If a row or the share fails, the list still exists: the result has itemError or shareError.",
+    parameters: Type.Object({
+      channelId: channelIdParam(),
+      threadTs: Type.String({
+        description: "Timestamp of the thread's parent message, e.g. 1726000000.000100.",
+      }),
+      listId: Type.Optional(
+        Type.String({ description: "Add rows to this list instead of creating one, e.g. F0123ABCD." }),
+      ),
+      name: Type.Optional(
+        Type.String({ description: "Name for a new list. Default: Action items and the thread's date." }),
+      ),
+      items: Type.Optional(
+        Type.Array(
+          Type.Object(
+            {
+              task: Type.String({ minLength: 1, description: "What needs doing." }),
+              assignee: Type.Optional(Type.String({ description: "User ID who owns it, e.g. U0123ABCD." })),
+              dueDate: Type.Optional(Type.String({ description: "Due date as YYYY-MM-DD." })),
+            },
+            { additionalProperties: false },
+          ),
+          {
+            minItems: 1,
+            description:
+              "Action items you've already picked out of the thread. Set this to skip automatic extraction. Assignees and due dates are written only if the list has to-do columns.",
+          },
+        ),
+      ),
+      ...accessTargetParams("share the list with"),
+      accessLevel: Type.Optional(
+        Type.Union([Type.Literal("read"), Type.Literal("write"), Type.Literal("owner")], {
+          description: "Access to grant when sharing. owner is valid for userIds only. Default: write.",
+        }),
+      ),
+    }),
+    outputSchema: Type.Object(
+      {
+        listId: Type.String(),
+        created: Type.Boolean({ description: "True if this call created the list." }),
+        itemsCreated: Type.Integer(),
+        itemIds: Type.Array(Type.String()),
+        itemError: Type.Optional(
+          Type.String({ description: "Why row creation stopped early; rows after itemIds weren't added." }),
+        ),
+        messageCount: Type.Integer(),
+        truncated: Type.Boolean({ description: "True if the thread was too long to fetch in full." }),
+        sharedWith: Type.Union([Type.Array(Type.String()), Type.Null()]),
+        shareError: Type.Optional(Type.String()),
+      },
+      { additionalProperties: false },
+    ),
+    async execute(
+      { channelId, threadTs, listId, name, items, channelIds, userIds, accessLevel },
+      config,
+      context,
+    ) {
+      context.signal?.throwIfAborted();
+      // Validate up front so a bad argument never leaves a half-filled list behind.
+      const explicit =
+        channelIds?.length || userIds?.length ? accessTarget(channelIds, userIds) : undefined;
+      const target = explicit ?? (listId ? undefined : { channelIds: [channelId] });
+      const level = accessLevel ?? "write";
+      if (level === "owner" && !(target && "userIds" in target)) {
+        throw new Error("owner access can only be granted to users, not channels.");
+      }
+      const badDate = items?.find((item) => item.dueDate !== undefined && !DATE.test(item.dueDate));
+      if (badDate) throw new Error(`dueDate must be YYYY-MM-DD, got "${badDate.dueDate}".`);
+
+      const token = resolveToken(config);
+      const { messages, truncated } = await fetchThread(token, channelId, threadTs, context);
+      if (!messages.length) {
+        throw new Error(`No messages found in thread ${threadTs} of ${channelId}.`);
+      }
+      const actionItems = items ?? extractActionItems(messages);
+      if (!actionItems.length) {
+        throw new Error(
+          `No action items found in thread ${threadTs} of ${channelId}. Pass items to add them yourself.`,
+        );
+      }
+
+      let targetListId: string;
+      let columns: ListColumn[];
+      if (listId) {
+        targetListId = listId;
+        ({ columns } = await fetchListSchema(listId, config, context));
+      } else {
+        const data = await callSlack(
+          "slackLists.create",
+          token,
+          {
+            name: name ?? `Action items · ${threadDate(messages[0]!.ts)}`,
+            todo_mode: true,
+            schema: [{ key: "task", name: "Task", type: "text", is_primary_column: true }],
+          },
+          context,
+        );
+        targetListId = String(data.list_id ?? "");
+        const schema = (data.list_metadata as { schema?: RawColumn[] } | undefined)?.schema;
+        columns = schema?.length
+          ? schema.map(schemaColumn)
+          : (await fetchListSchema(targetListId, config, context)).columns;
+      }
+
+      // Slack has no batch create: one call per row, stopping at the first failure.
+      const slots = actionItemColumns(columns, targetListId);
+      const itemIds: string[] = [];
+      let itemError: string | undefined;
+      for (const item of actionItems) {
+        const fields = [
+          richTextCell(slots.task.id, item.task),
+          ...(slots.assignee && item.assignee ? [encodeListCell(slots.assignee, [item.assignee])] : []),
+          ...(slots.dueDate && item.dueDate ? [encodeListCell(slots.dueDate, item.dueDate)] : []),
+        ];
+        try {
+          const data = await callSlack(
+            "slackLists.items.create",
+            token,
+            { list_id: targetListId, initial_fields: fields },
+            context,
+          );
+          itemIds.push(String((data.item as { id?: unknown } | undefined)?.id ?? ""));
+        } catch (error) {
+          context.signal?.throwIfAborted();
+          itemError = error instanceof Error ? error.message : String(error);
+          break;
+        }
+      }
+
+      const shared = await shareList(token, targetListId, target, level, context);
+      return {
+        listId: targetListId,
+        created: !listId,
+        itemsCreated: itemIds.length,
+        itemIds,
+        ...(itemError ? { itemError } : {}),
+        messageCount: messages.length,
+        truncated,
+        ...shared,
+      };
     },
   }),
 ];
