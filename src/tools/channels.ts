@@ -61,7 +61,7 @@ function requireConfirm(confirm: unknown, action: string): void {
   }
 }
 
-/** Curated channel (see "Output shaping" in schemas.ts): Slack's carries ~30 fields. */
+/** Curated channel (see "Output shaping" in schemas.ts): Slack's channel object carries ~30 fields. */
 const slackChannel = Type.Object(
   { id: Type.String(), name: Type.String() },
   { additionalProperties: false },
