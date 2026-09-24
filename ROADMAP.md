@@ -751,7 +751,9 @@ channel plugin does *not* already own — see **Not doing**, below).
   - Tests: mocked test against the confirmed method, if any.
   - Size: S
 
-- [ ] **W-04: Spike — mcp:connect** — Confirm whether any Web API method actually consumes `mcp:connect`, or whether it's purely an admin/workspace-console-configured capability (an org admin adding OpenClaw's own MCP server into Slack's native AI) with zero code surface for a tool plugin.
+- [x] **W-04: Spike — mcp:connect** — Confirm whether any Web API method actually consumes `mcp:connect`, or whether it's purely an admin/workspace-console-configured capability (an org admin adding OpenClaw's own MCP server into Slack's native AI) with zero code surface for a tool plugin.
+  - **Finding (2026-09-24): no Web API method consumes `mcp:connect`, so this tool plugin has nothing to build.** The scope is inbound-only. The docs.slack.dev scope page (`mcp:connect`, Bot token only) describes it as "Allows your Slack app to connect to Slack AI features through Model Context Protocol (MCP) servers" and lists no methods. The feature it gates is the **Slackbot MCP client** (docs.slack.dev `ai/slackbot-mcp-client`). The app declares a remote MCP server in its manifest's `mcp_servers` block (`url`, `auth_type` of `no_auth`/`slack_identity_auth`/`dynamic_client_registration`/`manual_auth`, and `auth_provider_key` for the OAuth types), or in the "MCP Servers" section of App Settings, which writes the same block and adds `mcp:connect` automatically. From then on, *Slack* calls *the server*: Slackbot sends JSON-RPC over the Streamable HTTP transport to a public HTTPS endpoint, discovers its tools and invokes them from user prompts. The docs say stdio and the old HTTP+SSE transport aren't supported, and a tool call that takes more than 60 seconds is aborted. The app never sends a token-bearing request that uses this scope. The only MCP-related Web API methods are `admin.apps.mcp.servers.list` and `admin.apps.mcp.servers.permissions.list`/`.set`. Those are Enterprise-plan org-admin methods that take a *user* token with `admin.apps:read`/`admin.apps:write`, not `mcp:connect`, and they manage the org allowlist and who may use a server. This workspace has no admin scopes, and admin tooling is out of scope anyway. So the real "use" of `mcp:connect` would be exposing **OpenClaw itself** as an MCP server to Slackbot. That needs (1) an OpenClaw Gateway endpoint that speaks Streamable HTTP MCP, which a `defineToolPlugin` tool can't provide, (2) a public HTTPS origin, which `lostgradient` lacks (**O-06**), and (3) a manifest edit on api.slack.com (manual). Recorded in **Scope hygiene**, **Not doing** and **Open questions**.
+  - Live verification pending: none needed for the decision. There's no method to call with a bot token. A future live check, if the owner pursues the Slackbot-MCP route, is whether Slackbot in `lostgradient` lists a registered server's tools, and it would need a public Gateway MCP endpoint first.
   - Why: granted but nothing in this plugin (or research) found a callable method for it.
   - Scope(s) & token type: `mcp:connect`, bot token.
   - API methods: TBD — spike output, likely none.
@@ -1062,8 +1064,15 @@ gated through **O-02**. Findings:
   generated `slack-edge` client define one. Nothing in this plugin can
   exercise them. Drop both at the next manifest review (fold into **O-11**)
   unless Slack publishes a `workflows.templates.*` method.
-- **`mcp:connect`** — see **W-04**; needs a spike to confirm a concrete Web
-  API method exists before being kept.
+- **`mcp:connect` (W-04: no method consumes it; flag for removal).** The
+  scope only lets Slackbot call an MCP server declared in the app manifest's
+  `mcp_servers` block. Slack is the client, and the app never makes a request
+  that uses it. The MCP-related Web API methods
+  (`admin.apps.mcp.servers.list`, `admin.apps.mcp.servers.permissions.*`)
+  are Enterprise org-admin methods on `admin.apps:*` user tokens, not
+  `mcp:connect`. Nothing in this plugin can exercise it. Drop it at the next
+  manifest review (fold into **O-11**) unless the owner decides to expose
+  OpenClaw's Gateway as an MCP server to Slackbot (see **Open questions**).
 - **`usergroups:write`** is correctly **not** granted — keep it that way
   unless a write-capable usergroup feature is explicitly scoped and justified
   (see S-04, which ships read-only by design).
@@ -1154,6 +1163,11 @@ Recorded so a future pass through this backlog doesn't re-propose them:
   method reads, creates or publishes Workflow Builder templates, despite the
   `workflows.templates:*` scopes existing. Templates are a UI-only gallery
   today. Revisit if Slack documents a `workflows.templates.*` method.
+- **Any `mcp:connect`-backed tool (W-04).** The scope has no Web API
+  surface. It authorizes Slackbot to call *into* an MCP server listed in the
+  app manifest, so there's nothing for an agent tool to call. Making OpenClaw
+  reachable from Slackbot would be Gateway work (a public Streamable HTTP MCP
+  endpoint) plus a manual manifest edit, not a tool in this plugin.
 - **A `slack_list_discovery` tool (L-07).** Slack has no documented method
   that enumerates Lists in a workspace or channel. Callers must already know a
   `list_id` (from `slack_list_create` or a shared link); `search.files` may
@@ -1212,6 +1226,12 @@ Recorded 2026-09-23 by the owner:
   `slack_canvas_create` flow**, which relies on `canvases.access.set` for the
   *first* share? Needs a live smoke test against a real `canvas_id`, not
   further doc reading — fold into I-01/C-04's implementation.
+- **Should OpenClaw be exposed to Slackbot as an MCP server?** This is the
+  only real use of the granted `mcp:connect` scope (see W-04). It would need
+  an OpenClaw Gateway endpoint speaking Streamable HTTP MCP, a public HTTPS
+  origin (**O-06**) and an `mcp_servers` manifest entry, and it would overlap
+  with the channel plugin's own conversational surface. If the owner says no,
+  drop the scope with **O-11**.
 - **Are `channels:manage`/`channels:write.topic`/`channels:write.invites`
   being deliberately scoped to public channels only** (a risk decision), or
   should `groups:write*` be requested for private-channel automation? Ask
