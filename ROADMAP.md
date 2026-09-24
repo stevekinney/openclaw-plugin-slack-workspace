@@ -727,7 +727,9 @@ channel plugin does *not* already own — see **Not doing**, below).
   - Tests: mocked test against the confirmed method, if any.
   - Size: S
 
-- [ ] **W-02: Add slack_workflow_trigger_run** — Once a webhook trigger is created once in Workflow Builder (a stable `hooks.slack.com/triggers/...` URL is minted), add a tool accepting a configured named map of these URLs and POSTing a JSON body to start the workflow conversationally.
+- [x] **W-02: Add slack_workflow_trigger_run** — Once a webhook trigger is created once in Workflow Builder (a stable `hooks.slack.com/triggers/...` URL is minted), add a tool accepting a configured named map of these URLs and POSTing a JSON body to start the workflow conversationally.
+  - Done (2026-09-24): `slack_workflow_trigger_run(name, payload?)` in `src/tools/workflows.ts`, configured by the new `workflowTriggers` map (string or SecretRef per entry). `scripts/patch-manifest.mjs` doesn't exist, since the manifest is hand-authored, so `workflowTriggers.*` was added to `configContracts.secretInputs` in `openclaw.plugin.json` directly (OpenClaw supports `*` wildcards for map segments). The URL is never logged or echoed in errors.
+  - Live verification pending: create a webhook trigger in Workflow Builder on `lostgradient`, configure it, and run the tool once to confirm Slack answers `200 {"ok":true}` and the workflow starts.
   - Why: needs no new bot scope — the URL is the credential, mirroring `resolveToken()`'s existing SecretRef pattern — and directly answers the "Workflows" feature ask.
   - Scope(s) & token type: none (URL-as-credential, configured like botToken/userToken).
   - API methods: plain `POST` to the configured trigger URL.

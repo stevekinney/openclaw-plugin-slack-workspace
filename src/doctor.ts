@@ -7,7 +7,7 @@ type TokenKind = "bot" | "user";
  * The token each tool calls Slack with and the OAuth scopes its methods need, per
  * docs.slack.dev. A test keeps this map in step with the registered tools.
  */
-export const TOOL_SCOPES: Record<string, { token: TokenKind; scopes: string[] }> = {
+export const TOOL_SCOPES: Record<string, { token: TokenKind | "none"; scopes: string[] }> = {
   // auth.test needs no scope.
   slack_identity: { token: "bot", scopes: [] },
   slack_search: { token: "user", scopes: ["search:read"] },
@@ -78,6 +78,8 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind; scopes: string[] }>
   slack_file_upload: { token: "bot", scopes: ["files:write"] },
   slack_assistant_set_title: { token: "bot", scopes: ["assistant:write"] },
   slack_assistant_suggest_prompts: { token: "bot", scopes: ["assistant:write"] },
+  // POSTs to a configured webhook URL; the URL is the credential, not a Slack token.
+  slack_workflow_trigger_run: { token: "none", scopes: [] },
 };
 
 export type TokenAudit = {

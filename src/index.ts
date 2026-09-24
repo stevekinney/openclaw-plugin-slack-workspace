@@ -16,7 +16,7 @@ const jsonSchema = (schema: TSchema) => schema as unknown as ToolPluginMetadata[
 const id = "slack-workspace";
 const name = "Slack Workspace";
 const description =
-  "Slack workspace tools: identity and message scheduling, search, structured messaging (tables, plans, charts, rich text), raw Block Kit messages, canvases, channel bookmarks, public-channel lifecycle (create, archive, rename, topic, purpose, invite, join, leave, one-call kickoff), Slack Lists, and file uploads.";
+  "Slack workspace tools: identity and message scheduling, search, structured messaging (tables, plans, charts, rich text), raw Block Kit messages, canvases, channel bookmarks, public-channel lifecycle (create, archive, rename, topic, purpose, invite, join, leave, one-call kickoff), Slack Lists, file uploads, and Workflow Builder webhook triggers.";
 const pluginConfigSchema = buildJsonPluginConfigSchema(jsonSchema(configSchema));
 
 const entry = definePluginEntry({
