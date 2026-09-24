@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { Type } from "typebox";
 import {
   callSlack,
@@ -120,6 +121,42 @@ export const createdCanvasSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+
+/** Starter templates shipped in `skills/slack-canvas/templates/`. */
+export const CANVAS_TEMPLATES = ["status-board", "meeting-notes", "project-brief"] as const;
+
+type CanvasTemplate = (typeof CANVAS_TEMPLATES)[number];
+
+const PLACEHOLDER = /\{\{([A-Za-z][A-Za-z0-9]*)\}\}/g;
+
+// `src/tools/` and `dist/tools/` sit at the same depth, so this resolves from both.
+const templateSource = (template: CanvasTemplate) =>
+  readFile(new URL(`../../skills/slack-canvas/templates/${template}.md`, import.meta.url), "utf8");
+
+/** Placeholder names in a template, sorted, without duplicates. */
+export async function canvasTemplatePlaceholders(template: CanvasTemplate) {
+  const source = await templateSource(template);
+  return [...new Set([...source.matchAll(PLACEHOLDER)].map((match) => match[1]!))].sort();
+}
+
+/**
+ * Fill a template's `{{placeholder}}`s in one pass, so placeholder-like text inside a
+ * value is left as written. Every placeholder needs a value and every value needs a
+ * placeholder: a missing one would ship literal braces, an extra one is likely a typo.
+ */
+export async function renderCanvasTemplate(template: CanvasTemplate, values: Record<string, string>) {
+  const source = await templateSource(template);
+  const names = new Set([...source.matchAll(PLACEHOLDER)].map((match) => match[1]!));
+  const missing = [...names].filter((name) => !Object.hasOwn(values, name)).sort();
+  if (missing.length) {
+    throw new Error(`Template ${template} is missing values for: ${missing.join(", ")}.`);
+  }
+  const unused = Object.keys(values).filter((name) => !names.has(name)).sort();
+  if (unused.length) {
+    throw new Error(`Template ${template} has no placeholder for: ${unused.join(", ")}.`);
+  }
+  return source.replace(PLACEHOLDER, (_, name: string) => values[name]!);
+}
 
 /**
  * Create a canvas and optionally share it to channels. The canvas exists once create
@@ -435,12 +472,30 @@ export const canvasTools = (tool: ToolFactory) => [
     name: "slack_canvas_create",
     label: "Create Slack canvas",
     description:
-      "Create a Slack canvas from markdown. Optionally share it to channels with read or write access; use slack_canvas_access_set to share with users or grant owner. If sharing fails, the canvas still exists: the result has sharedWith null and a shareError.",
+      "Create a Slack canvas from markdown or from a starter template (status-board, meeting-notes, project-brief) whose {{placeholder}}s are filled from values. Optionally share it to channels with read or write access; use slack_canvas_access_set to share with users or grant owner. If sharing fails, the canvas still exists: the result has sharedWith null and a shareError.",
     parameters: Type.Object({
       title: Type.String({ description: "Canvas title." }),
-      markdown: Type.String({
-        description: "Canvas body as markdown. Supports headings, lists, checklists, tables, code.",
-      }),
+      markdown: Type.Optional(
+        Type.String({
+          description:
+            "Canvas body as markdown. Supports headings, lists, checklists, tables, code. Pass this or template.",
+        }),
+      ),
+      template: Type.Optional(
+        Type.Union(
+          CANVAS_TEMPLATES.map((name) => Type.Literal(name)),
+          {
+            description:
+              "Starter template for the body, instead of markdown. Placeholders: status-board: status, owner, updated, summary, done, inProgress, blocked, next. meeting-notes: date, facilitator, attendees, agenda, notes, decisions, actionItems. project-brief: owner, targetDate, problem, goals, nonGoals, approach, milestones, openQuestions.",
+          },
+        ),
+      ),
+      values: Type.Optional(
+        Type.Record(Type.String(), Type.String(), {
+          description:
+            "Markdown for each of the template's placeholders, keyed by name. Every placeholder is required; unknown keys are rejected.",
+        }),
+      ),
       channelIds: Type.Optional(
         Type.Array(Type.String({ description: CHANNEL_ID_DESCRIPTION }), {
           uniqueItems: true,
@@ -454,9 +509,17 @@ export const canvasTools = (tool: ToolFactory) => [
       ),
     }),
     outputSchema: createdCanvasSchema,
-    async execute({ title, markdown, channelIds, accessLevel }, config, context) {
+    async execute({ title, markdown, template, values, channelIds, accessLevel }, config, context) {
       context.signal?.throwIfAborted();
-      return createCanvas(resolveToken(config), { title, markdown, channelIds, accessLevel }, context);
+      if (markdown !== undefined && template) throw new Error("Pass markdown or template, not both.");
+      if (markdown === undefined && !template) throw new Error("Pass markdown or template, not neither.");
+      if (values && !template) throw new Error("values only apply with template.");
+      const body = template ? await renderCanvasTemplate(template, values ?? {}) : markdown!;
+      return createCanvas(
+        resolveToken(config),
+        { title, markdown: body, channelIds, accessLevel },
+        context,
+      );
     },
   }),
 
