@@ -65,4 +65,5 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
   slack_list_access_set: idempotentWrite,
   slack_list_access_delete: idempotentWrite,
   slack_list_from_thread: write,
+  slack_file_upload: write,
 };
