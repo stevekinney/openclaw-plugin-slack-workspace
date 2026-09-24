@@ -778,7 +778,7 @@ channel plugin does *not* already own — see **Not doing**, below).
   - Size: S
   - **Finding (2026-09-24): recipe written to `docs/workflow-builder-gateway-bridge.md`, with two corrections to this entry's premise.** (1) Workflow Builder has no built-in "Send a webhook" or "Extract values from JSON" step. Both came from the third-party Workflow Buddy app, built on the legacy Steps from Apps feature Slack retired on 2024-09-12. The outbound POST now has to come from a custom step (a small separate Bolt app with a `function_executed` handler) or a third-party connector. (2) `/hooks/agent` never returns the agent's reply text, not even with `waitForCompletion: true`; `completion` carries only `status`, `replyDisposition` and delivery flags. So the reply comes back through OpenClaw's own delivery (`channel: "slack"`, `to: "channel:C…"`), not through extracted JSON. Live verification stays with **H-03**, after **O-06**.
 
-- [ ] **H-02: Document inbound webhook alerting via OpenClaw's own Gateway/webhooks mechanisms** — External-system-to-OpenClaw-via-Slack is already solved by OpenClaw core (`POST /hooks/wake`/`/hooks/agent` with direct Slack delivery, plus the bundled webhooks plugin for stateful TaskFlow ingress). Add a short doc/skill section mapping the inbound patterns (Gateway hooks vs. the webhooks plugin vs. Slack's own `incoming-webhook`) to when to use each.
+- [x] **H-02: Document inbound webhook alerting via OpenClaw's own Gateway/webhooks mechanisms** — External-system-to-OpenClaw-via-Slack is already solved by OpenClaw core (`POST /hooks/wake`/`/hooks/agent` with direct Slack delivery, plus the bundled webhooks plugin for stateful TaskFlow ingress). Add a short doc/skill section mapping the inbound patterns (Gateway hooks vs. the webhooks plugin vs. Slack's own `incoming-webhook`) to when to use each.
   - Why: prevents this plugin from re-implementing an HTTP listener OpenClaw core already provides — directly serves the "no duplication" guiding principle for the "Webhooks" feature ask.
   - Scope(s) & token type: none.
   - API methods: none.
@@ -787,6 +787,7 @@ channel plugin does *not* already own — see **Not doing**, below).
   - Acceptance criteria: the doc section exists and clearly states when to use each of the three inbound patterns.
   - Tests: none (doc task).
   - Size: S
+  - **Finding (2026-09-24): written to `docs/inbound-webhooks.md` and linked from the README, with one correction to this entry's premise.** The bundled Webhooks plugin never starts an agent. Its routes create and advance TaskFlow *records* (`create_flow`, `run_task`, `finish_flow`, …) for an external controller, so it's not an alerting path on its own. For alerts the doc recommends `/hooks/agent` with `channel: "slack"` + `to` when the agent should triage first, and a Slack incoming webhook when only the raw text is needed. `/hooks/wake` suits short trusted nudges, and its message follows the agent's heartbeat target rather than a chosen channel.
 
 ---
 
