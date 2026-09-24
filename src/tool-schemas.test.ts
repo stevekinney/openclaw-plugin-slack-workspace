@@ -29,8 +29,8 @@ const READ_ONLY = [
 ];
 
 describe("outputSchema", () => {
-  it("is declared by all 44 tools", () => {
-    expect(tools).toHaveLength(44);
+  it("is declared by all 45 tools", () => {
+    expect(tools).toHaveLength(45);
     for (const tool of tools) expect(tool.outputSchema, tool.name).toBeDefined();
   });
 });
@@ -155,6 +155,7 @@ describe("metadata parameter", () => {
     ["slack_post_table", { channelId: "C0TEST", caption: "T", columns: ["a"], rows: [["1"]] }],
     ["slack_post_plan", { channelId: "C0TEST", title: "P", tasks: [{ title: "x", status: "pending" }] }],
     ["slack_post_chart", { channelId: "C0TEST", title: "C", chartType: "pie", segments: [{ label: "a", value: 1 }] }],
+    ["slack_post_rich_text", { channelId: "C0TEST", sections: [{ type: "paragraph", text: "x" }] }],
     ["slack_blocks_send", { channelId: "C0TEST", text: "t", blocks: [{ type: "divider" }] }],
     ["slack_blocks_update", { channelId: "C0TEST", ts: "1.2", text: "t", blocks: [{ type: "divider" }] }],
   ];

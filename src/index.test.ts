@@ -20,6 +20,7 @@ describe("slack-workspace", () => {
       "slack_scheduled_cancel",
       "slack_post_table",
       "slack_post_plan",
+      "slack_post_rich_text",
       "slack_post_chart",
       "slack_blocks_send",
       "slack_blocks_update",

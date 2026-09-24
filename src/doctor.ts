@@ -18,6 +18,7 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind; scopes: string[] }>
   slack_post_table: { token: "bot", scopes: ["chat:write"] },
   slack_post_plan: { token: "bot", scopes: ["chat:write"] },
   slack_post_chart: { token: "bot", scopes: ["chat:write"] },
+  slack_post_rich_text: { token: "bot", scopes: ["chat:write"] },
   slack_blocks_send: { token: "bot", scopes: ["chat:write"] },
   slack_blocks_update: { token: "bot", scopes: ["chat:write"] },
   // groups:/im:/mpim:history stand in for channels:history on private channels and DMs.
