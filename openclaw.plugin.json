@@ -1,0 +1,105 @@
+{
+  "id": "slack-workspace",
+  "name": "Slack Workspace",
+  "description": "Create and edit Slack canvases and manage channel bookmarks.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "botToken": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "required": [
+              "source",
+              "id"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "provider": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "description": "Slack bot token (xoxb-) or a SecretRef ({source,provider,id}). Falls back to SLACK_BOT_TOKEN."
+      },
+      "userToken": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "object",
+            "required": [
+              "source",
+              "id"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "provider": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "description": "Slack user token (xoxp-) or a SecretRef. Required by search and reminders, which reject bot tokens. Falls back to SLACK_USER_TOKEN."
+      }
+    }
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "configContracts": {
+    "secretInputs": {
+      "paths": [
+        {
+          "path": "botToken",
+          "expected": "string",
+          "ownerKind": "capability"
+        },
+        {
+          "path": "userToken",
+          "expected": "string",
+          "ownerKind": "capability"
+        }
+      ]
+    }
+  },
+  "skills": [
+    "./skills"
+  ],
+  "contracts": {
+    "tools": [
+      "slack_identity",
+      "slack_search",
+      "slack_schedule_message",
+      "slack_scheduled_list",
+      "slack_scheduled_cancel",
+      "slack_post_table",
+      "slack_post_plan",
+      "slack_post_chart",
+      "slack_blocks_send",
+      "slack_blocks_update",
+      "slack_canvas_create",
+      "slack_canvas_edit",
+      "slack_canvas_sections",
+      "slack_bookmark_list",
+      "slack_bookmark_add",
+      "slack_bookmark_remove"
+    ]
+  }
+}
