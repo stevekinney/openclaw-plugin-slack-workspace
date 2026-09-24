@@ -2,9 +2,10 @@ import { isDeepStrictEqual } from "node:util";
 import { Type, type Static } from "typebox";
 import { callSlack, resolveToken, type PluginConfig, type SlackCallContext } from "../client.js";
 import { cursorParams, toPage } from "../pagination.js";
+import { resolveChannelId } from "../tool.js";
 import {
+  activeChannelIdParam,
   blocksSchema,
-  channelIdParam,
   metadataParam,
   postResultSchema,
   replyBroadcastParam,
@@ -293,7 +294,7 @@ export const messagingTools = (tool: ToolFactory) => [
       return postOrUpdate(
         config,
         {
-          channelId,
+          channelId: resolveChannelId(channelId, context),
           text: tableFallback(caption, columns, rows),
           blocks: [table],
           threadTs,
@@ -363,7 +364,7 @@ export const messagingTools = (tool: ToolFactory) => [
       return postOrUpdate(
         config,
         {
-          channelId,
+          channelId: resolveChannelId(channelId, context),
           text: `${title} — ${done}/${tasks.length} complete`,
           blocks: [plan],
           threadTs,
@@ -416,7 +417,7 @@ export const messagingTools = (tool: ToolFactory) => [
       return postOrUpdate(
         config,
         {
-          channelId,
+          channelId: resolveChannelId(channelId, context),
           text: text ?? richTextFallback(sections),
           blocks: [{ type: "rich_text", elements: sections.map(richTextElement) }],
           threadTs,
@@ -527,7 +528,7 @@ export const messagingTools = (tool: ToolFactory) => [
       return postOrUpdate(
         config,
         {
-          channelId,
+          channelId: resolveChannelId(channelId, context),
           text,
           blocks: [{ type: "data_visualization", title, chart }],
           threadTs: args.threadTs,
@@ -548,7 +549,7 @@ export const messagingTools = (tool: ToolFactory) => [
     description:
       "Post a message built from raw Slack Block Kit blocks. Use when the layout needs block types OpenClaw's portable `presentation` cannot express — headers, rich_text, tables, images, button rows, carousels, alerts. Always set `text` as the notification fallback.",
     parameters: Type.Object({
-      channelId: channelIdParam(),
+      channelId: activeChannelIdParam(),
       text: Type.String({
         description:
           "Plain-text fallback used in notifications and by screen readers. Required by Slack; summarize the blocks.",
@@ -564,11 +565,12 @@ export const messagingTools = (tool: ToolFactory) => [
       { additionalProperties: false },
     ),
     async execute(
-      { channelId, text, blocks, threadTs, replyBroadcast, unfurlLinks, unfurlMedia, metadata },
+      { channelId: explicitChannelId, text, blocks, threadTs, replyBroadcast, unfurlLinks, unfurlMedia, metadata },
       config,
       context,
     ) {
       context.signal?.throwIfAborted();
+      const channelId = resolveChannelId(explicitChannelId, context);
       const body: Record<string, unknown> = {
         channel: channelId,
         text,
@@ -595,7 +597,7 @@ export const messagingTools = (tool: ToolFactory) => [
     description:
       "Replace the blocks of a message this app posted. Use to keep one card current — a build status, a running checklist — instead of posting a new message each time.",
     parameters: Type.Object({
-      channelId: channelIdParam("The channel the message lives in."),
+      channelId: activeChannelIdParam("The channel the message lives in."),
       ts: Type.String({ description: "Message timestamp from slack_blocks_send." }),
       text: Type.String({ description: "Updated plain-text notification fallback." }),
       blocks: blocksSchema,
@@ -605,8 +607,9 @@ export const messagingTools = (tool: ToolFactory) => [
       { channelId: Type.String(), ts: Type.String(), blockCount: Type.Number() },
       { additionalProperties: false },
     ),
-    async execute({ channelId, ts, text, blocks, metadata }, config, context) {
+    async execute({ channelId: explicitChannelId, ts, text, blocks, metadata }, config, context) {
       context.signal?.throwIfAborted();
+      const channelId = resolveChannelId(explicitChannelId, context);
       const body: Record<string, unknown> = { channel: channelId, ts, text, blocks };
       if (metadata) body.metadata = toSlackMetadata(metadata);
       const data = await callSlack("chat.update", resolveToken(config, "bot"), body, context);
@@ -620,7 +623,7 @@ export const messagingTools = (tool: ToolFactory) => [
     description:
       "Find messages by the metadata stamped on them (the `metadata` param of slack_post_*/slack_blocks_*), newest first, and return each one's `ts` for slack_blocks_update or `updateTs`. Use this to re-find your own cards instead of remembering timestamps or searching text. Reads channel history, or one thread with `threadTs`, via conversations.history/replies — it polls on each call; nothing is pushed when metadata changes. Finds nothing if the event type isn't registered in the app manifest, because Slack drops unregistered metadata on post.",
     parameters: Type.Object({
-      channelId: channelIdParam("The channel to search."),
+      channelId: activeChannelIdParam("The channel to search."),
       eventType: Type.String({
         pattern: "^[A-Za-z0-9_]+$",
         maxLength: 255,
@@ -666,10 +669,20 @@ export const messagingTools = (tool: ToolFactory) => [
       { additionalProperties: false },
     ),
     async execute(
-      { channelId, eventType, matchPayload, threadTs, oldest, latest, limit = 20, maxPages = 5 },
+      {
+        channelId: explicitChannelId,
+        eventType,
+        matchPayload,
+        threadTs,
+        oldest,
+        latest,
+        limit = 20,
+        maxPages = 5,
+      },
       config,
       context,
     ) {
+      const channelId = resolveChannelId(explicitChannelId, context);
       const token = resolveToken(config, "bot");
       const method = threadTs ? "conversations.replies" : "conversations.history";
       const base: Record<string, unknown> = { channel: channelId, include_all_metadata: true };
@@ -720,7 +733,7 @@ export const messagingTools = (tool: ToolFactory) => [
     description:
       "Post a private message that only one user sees, inline in a shared channel or thread, without cluttering it for everyone else. Use for a personal nudge or a reminder aimed at one person. Ephemeral messages are temporary, can't be edited or found again later, and only reach a user who is a member of the channel.",
     parameters: Type.Object({
-      channelId: channelIdParam("The channel the user will see the message in."),
+      channelId: activeChannelIdParam("The channel the user will see the message in."),
       userId: Type.String({
         description: "The one user who sees the message, e.g. U0ALICE. Must be a member of the channel.",
       }),
@@ -742,8 +755,9 @@ export const messagingTools = (tool: ToolFactory) => [
       },
       { additionalProperties: false },
     ),
-    async execute({ channelId, userId, text, blocks, threadTs }, config, context) {
+    async execute({ channelId: explicitChannelId, userId, text, blocks, threadTs }, config, context) {
       context.signal?.throwIfAborted();
+      const channelId = resolveChannelId(explicitChannelId, context);
       const body: Record<string, unknown> = { channel: channelId, user: userId, text };
       if (blocks) body.blocks = blocks;
       if (threadTs) body.thread_ts = threadTs;

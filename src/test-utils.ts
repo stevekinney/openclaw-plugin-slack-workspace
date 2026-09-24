@@ -99,6 +99,12 @@ export function recordingLogger(lines: LogLine[] = []) {
   };
 }
 
+/**
+ * The slice of the host's per-turn tool context (`OpenClawPluginToolContext`) the
+ * plugin reads. Empty means no active conversation turn, e.g. a cron run.
+ */
+export type TurnContext = { messageChannel?: string; nativeChannelId?: string };
+
 /** One `api.on(...)` registration captured from the fake plugin API. */
 export type RegisteredHook = {
   hookName: string;
@@ -114,11 +120,13 @@ export type RegisteredCli = {
 
 /**
  * Run the plugin's `register(api)` against a minimal fake API and return every tool,
- * hook, and CLI registrar it registered, in registration order.
+ * hook, and CLI registrar it registered, in registration order. Tool factories are
+ * resolved with `turn`, the way the host resolves them at the start of a turn.
  */
 export function registerPlugin(
   config: Record<string, unknown> = TEST_CONFIG,
   logger = recordingLogger(),
+  turn: TurnContext = {},
 ): { tools: RegisteredTool[]; hooks: RegisteredHook[]; clis: RegisteredCli[] } {
   const tools: RegisteredTool[] = [];
   const hooks: RegisteredHook[] = [];
@@ -126,7 +134,8 @@ export function registerPlugin(
   const api = {
     pluginConfig: config,
     logger,
-    registerTool: (tool: RegisteredTool) => tools.push(tool),
+    registerTool: (tool: RegisteredTool | ((ctx: TurnContext) => RegisteredTool)) =>
+      tools.push(typeof tool === "function" ? tool(turn) : tool),
     on: (hookName: string, handler: RegisteredHook["handler"], opts?: RegisteredHook["opts"]) =>
       hooks.push({ hookName, handler, opts }),
     registerCli: (registrar: RegisteredCli["registrar"], opts?: RegisteredCli["opts"]) =>
@@ -146,8 +155,9 @@ export async function runTool(
   params: Record<string, unknown>,
   config: Record<string, unknown> = TEST_CONFIG,
   logger = recordingLogger(),
+  turn: TurnContext = {},
 ): Promise<unknown> {
-  const { tools } = registerPlugin(config, logger);
+  const { tools } = registerPlugin(config, logger, turn);
   const tool = tools.find((candidate) => candidate.name === name);
   if (!tool) throw new Error(`No registered tool named ${name}.`);
   return (await tool.execute("test-call", params)).details;

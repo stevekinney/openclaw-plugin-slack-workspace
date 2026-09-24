@@ -1,5 +1,9 @@
 import { Type, type Static, type TSchema } from "typebox";
-import type { AnyAgentTool, OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
+import type {
+  AnyAgentTool,
+  OpenClawPluginApi,
+  OpenClawPluginToolContext,
+} from "openclaw/plugin-sdk/plugin-entry";
 import { jsonResult, textResult } from "openclaw/plugin-sdk/tool-results";
 import type { AutoJoinState, PluginConfig } from "./client.js";
 
@@ -15,7 +19,35 @@ export type ToolContext = {
   onUpdate?: Parameters<AnyAgentTool["execute"]>[3];
   /** Channels this call auto-joined; see `callSlackRaw`. */
   autoJoin: AutoJoinState;
+  /**
+   * Slack conversation of the active inbound turn, from the host's trusted
+   * `nativeChannelId`. Unset outside a Slack turn (cron, automations, other channels).
+   */
+  activeChannelId?: string;
 };
+
+/**
+ * The Slack conversation the host says this turn came from. `nativeChannelId` is
+ * platform-native, so a Discord or Telegram turn's ID must not be read as a Slack one.
+ */
+export function activeSlackChannelId(ctx: OpenClawPluginToolContext): string | undefined {
+  if (ctx.messageChannel?.trim().toLowerCase() !== "slack") return undefined;
+  return ctx.nativeChannelId?.trim() || undefined;
+}
+
+/**
+ * The explicit `channelId`, or the active Slack turn's conversation when it is omitted.
+ * Out of turn there is nothing to default to, so the call fails before reaching Slack.
+ */
+export function resolveChannelId(channelId: string | undefined, context: ToolContext): string {
+  const resolved = channelId?.trim() || context.activeChannelId;
+  if (!resolved) {
+    throw new Error(
+      "channelId is required: this call is not running inside a Slack conversation, so there is no current channel to default to.",
+    );
+  }
+  return resolved;
+}
 
 export type ToolDefinition<TParams extends TSchema = TSchema> = {
   /** Model-facing tool name; must also appear in the manifest's `contracts.tools`. */
@@ -64,30 +96,40 @@ function withAutoJoined(result: unknown, autoJoin: AutoJoinState): unknown {
 
 export type ToolFactory = typeof defineTool;
 
-/** Register each tool with `api.registerTool`, wrapping its result the way the host expects. */
+/**
+ * Register each tool with `api.registerTool`, wrapping its result the way the host expects.
+ * Each is a factory so it sees the active turn (see `ToolContext.activeChannelId`).
+ */
 export function registerTools(api: OpenClawPluginApi, tools: readonly ToolDefinition[]): void {
   const config = (api.pluginConfig ?? {}) as PluginConfig;
   for (const tool of tools) {
-    api.registerTool({
-      name: tool.name,
-      label: tool.label ?? tool.name,
-      description: tool.description,
-      parameters: tool.parameters,
-      ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
-      execute: async (toolCallId, params, signal, onUpdate) => {
-        const autoJoin: AutoJoinState = { config, joined: new Set() };
-        const result = withAutoJoined(
-          await tool.execute(params as Static<TSchema>, config, {
-            api,
-            signal,
-            toolCallId,
-            onUpdate,
-            autoJoin,
-          }),
-          autoJoin,
-        );
-        return typeof result === "string" ? textResult(result, result) : jsonResult(result);
+    api.registerTool(
+      (ctx) => {
+        const activeChannelId = activeSlackChannelId(ctx);
+        return {
+          name: tool.name,
+          label: tool.label ?? tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+          ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
+          execute: async (toolCallId, params, signal, onUpdate) => {
+            const autoJoin: AutoJoinState = { config, joined: new Set() };
+            const result = withAutoJoined(
+              await tool.execute(params as Static<TSchema>, config, {
+                api,
+                signal,
+                toolCallId,
+                onUpdate,
+                autoJoin,
+                ...(activeChannelId ? { activeChannelId } : {}),
+              }),
+              autoJoin,
+            );
+            return typeof result === "string" ? textResult(result, result) : jsonResult(result);
+          },
+        };
       },
-    });
+      { name: tool.name },
+    );
   }
 }
