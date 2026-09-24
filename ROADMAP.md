@@ -851,7 +851,10 @@ channel plugin does *not* already own — see **Not doing**, below).
   - Tests: mocked calls for add/update/remove/share.
   - Size: M
 
-- [ ] **S-06: Record a decision on link unfurling / Work Objects** — `links:read`, `links:write`, `links.embed:write` are granted but architecturally inert today: `chat.unfurl` requires a prior `link_shared` event, and `link_shared` is not in this app's subscribed bot events; even if it were, `defineToolPlugin` (this plugin's current base) cannot receive raw Slack events at all — only `definePluginEntry` (O-01) can register that kind of hook.
+- [x] **S-06: Record a decision on link unfurling / Work Objects** — `links:read`, `links:write`, `links.embed:write` are granted but architecturally inert today: `chat.unfurl` requires a prior `link_shared` event, and `link_shared` is not in this app's subscribed bot events; even if it were, `defineToolPlugin` (this plugin's current base) cannot receive raw Slack events at all — only `definePluginEntry` (O-01) can register that kind of hook.
+  - **Decision (2026-09-24): option (b). Flag `links:read`/`links:write`/`links.embed:write` for removal at the next manifest review (fold into **O-11**). No unfurl follow-up task is scheduled.** Option (a) needs a follow-up ticket *with an owner*, and nobody owns the pieces it depends on. (1) `chat.unfurl` (docs.slack.dev reference: `links:write`, bot or user token) takes either `unfurl_id` + `source` or `channel` + `ts` from a `link_shared` event. The URL has to be on a domain "already registered and associated with your Slack app," which means an App Unfurl Domain added on api.slack.com (manual). (2) `link_shared` would have to be subscribed and relayed by the bundled channel plugin, which owns the app's only Socket Mode connection. That's a change to a plugin this repo doesn't control, and there's no forwarding mechanism for it (the same gate as M-10's `trigger_id` and modern Workflow Steps in **Not doing**). (3) Even with the relay, receiving it needs **O-01**. (4) No domain has been named for unfurling. OpenClaw links have no public origin (**O-06**), so there's nothing obvious to register. `links.embed:write` ("Embed video player URLs in messages and app surfaces") lists no consuming method on its scope page, and nothing in this plugin serves video. Trimming is still deferred (see **Decisions**), so this is recorded in **Scope hygiene** as a trim candidate, the same way W-01, W-03 and W-04 were, not as an instruction to reinstall now. Revisit if the owner names an unfurl domain *and* the channel plugin gains a `link_shared` relay after O-01 lands.
+  - Separate finding, recorded in **Open questions** and not built here: Slack's Work Objects docs (docs.slack.dev `messaging/work-objects-overview`, `messaging/work-objects-implementation`) say an app can post a Work Object *without* an unfurl by calling `chat.postMessage` with entity metadata in the existing `metadata` parameter. That path uses `chat:write` (already granted), not the `links:*` scopes, so it doesn't change this decision. It does need Work Objects enabled in the app's settings (manual), and without an `entity_details_requested` handler (events again) the flexpane shows the unfurl content as a placeholder.
+  - Live verification pending: none needed for the decision.
   - Why: this is a decision point, not a build task — implementing it for real would need both a cross-plugin change (channel plugin subscribes `link_shared` and forwards it) and the O-01 plugin-architecture migration (Tier 0.5, confirmed), or the scopes become trim candidates (trimming is deferred — see **Decisions**).
   - Scope(s) & token type: `links:read`/`links:write`/`links.embed:write`, bot token.
   - API methods: `chat.unfurl` (blocked pending the above).
@@ -1049,9 +1052,16 @@ gated through **O-02**. Findings:
   visible effect. Drop as part of **O-11** unless a future "set my own human
   presence during focus time" (user-token) feature is scheduled — that would
   be a distinct, separately-justified feature.
-- **`links:read` / `links:write` / `links.embed:write`** — see **S-06**;
-  decision pending, architecturally gated on `link_shared` event subscription
-  (a channel-plugin change) plus **O-01**.
+- **Trim candidate: `links:read` / `links:write` / `links.embed:write` (S-06:
+  no usable path; flag for removal).** `chat.unfurl` (`links:write`) only
+  works in response to a `link_shared` event for a URL on a registered App
+  Unfurl Domain. This app subscribes to no such event, has no unfurl domain,
+  and the channel plugin, which owns Socket Mode, has no relay for it. Even
+  with one, receiving it would need **O-01**. `links.embed:write` has no
+  documented consuming method. Drop all three at the next manifest review
+  (fold into **O-11**) unless the owner names an unfurl domain and a
+  channel-plugin `link_shared` relay is built. Work Objects posted directly
+  via `chat.postMessage` don't need these scopes (see **Open questions**).
 - **`triggers:read` / `triggers:write` (W-01: no usable path; flag for
   removal).** `workflows.triggers.create/update/delete/list/info` exist, but
   they're undocumented internals of the Deno/CLI automation platform and can
@@ -1139,8 +1149,9 @@ Recorded so a future pass through this backlog doesn't re-propose them:
   Kit; this plugin correctly has none (see D-03).
 - **`chat.unfurl` / Work Objects without event wiring.** Blocked on
   `link_shared` not being a subscribed bot event and `defineToolPlugin`'s
-  inability to receive raw Slack events — see S-06. Not buildable as a
-  standalone tool-plugin feature today.
+  inability to receive raw Slack events. Not buildable as a standalone
+  tool-plugin feature today; S-06 flagged the `links:*` scopes for removal
+  rather than scheduling a relay.
 - **Legacy Workflow Steps from Apps (`workflow.steps:execute`).** Retired by
   Slack 2024-09-26; cannot be built regardless of scope.
 - **Modern custom Workflow Steps (`functions.completeSuccess`/`Error`).**
@@ -1254,6 +1265,14 @@ Recorded 2026-09-23 by the owner:
 - **Does `openclaw secrets reload` exist as a real CLI command?**
   `resolveToken`'s error message (`src/index.ts:25`) tells operators to run
   it — unverified against CLI reference docs in this research pass.
+- **Is a `slack_work_object_post` tool wanted?** S-06 found that Work
+  Objects can be posted directly with `chat.postMessage` entity metadata
+  (`chat:write`, already granted), with no `link_shared` event. It would need
+  Work Objects enabled in the app's settings (manual), and without an
+  `entity_details_requested` handler (O-01 plus a channel-plugin relay) the
+  flexpane shows only a placeholder. The metadata payload shape is
+  UNVERIFIED against a live post. If the owner wants it, scope it as a new
+  Tier 2 rich-messages task.
 - **Is `channels.slack.botToken` (channel plugin config) intentionally kept
   independent of this plugin's own `botToken` config**, or should this plugin
   fall back to the channel plugin's already-resolved runtime token? Worth a
