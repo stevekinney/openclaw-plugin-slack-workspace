@@ -3,10 +3,12 @@ import { callSlack, resolveToken, type PluginConfig, type SlackCallContext } fro
 import {
   blocksSchema,
   channelIdParam,
+  metadataParam,
   postResultSchema,
   replyBroadcastParam,
   targetParams,
   threadTsParam,
+  toSlackMetadata,
   unfurlParams,
   type ToolFactory,
 } from "../schemas.js";
@@ -87,6 +89,7 @@ async function postOrUpdate(
     updateTs?: string;
     unfurlLinks?: boolean;
     unfurlMedia?: boolean;
+    metadata?: { eventType: string; eventPayload: Record<string, unknown> };
   },
   context?: SlackCallContext,
 ): Promise<{ channelId: string; ts: string; updated: boolean }> {
@@ -96,6 +99,7 @@ async function postOrUpdate(
     text: args.text,
     blocks: args.blocks,
   };
+  if (args.metadata) body.metadata = toSlackMetadata(args.metadata);
   if (args.updateTs) {
     body.ts = args.updateTs;
     const data = await callSlack("chat.update", token, body, context);
@@ -142,7 +146,7 @@ export const messagingTools = (tool: ToolFactory) => [
     }),
     outputSchema: postResultSchema,
     async execute(
-      { channelId, caption, columns, rows, pageSize, threadTs, replyBroadcast, updateTs, unfurlLinks, unfurlMedia },
+      { channelId, caption, columns, rows, pageSize, threadTs, replyBroadcast, updateTs, unfurlLinks, unfurlMedia, metadata },
       config,
       context,
     ) {
@@ -191,6 +195,7 @@ export const messagingTools = (tool: ToolFactory) => [
           updateTs,
           unfurlLinks,
           unfurlMedia,
+          metadata,
         },
         context,
       );
@@ -229,7 +234,7 @@ export const messagingTools = (tool: ToolFactory) => [
     }),
     outputSchema: postResultSchema,
     async execute(
-      { channelId, title, tasks, threadTs, replyBroadcast, updateTs, unfurlLinks, unfurlMedia },
+      { channelId, title, tasks, threadTs, replyBroadcast, updateTs, unfurlLinks, unfurlMedia, metadata },
       config,
       context,
     ) {
@@ -260,6 +265,7 @@ export const messagingTools = (tool: ToolFactory) => [
           updateTs,
           unfurlLinks,
           unfurlMedia,
+          metadata,
         },
         context,
       );
@@ -370,6 +376,7 @@ export const messagingTools = (tool: ToolFactory) => [
           updateTs: args.updateTs,
           unfurlLinks: args.unfurlLinks,
           unfurlMedia: args.unfurlMedia,
+          metadata: args.metadata,
         },
         context,
       );
@@ -391,13 +398,14 @@ export const messagingTools = (tool: ToolFactory) => [
       threadTs: threadTsParam,
       replyBroadcast: replyBroadcastParam,
       ...unfurlParams,
+      metadata: metadataParam,
     }),
     outputSchema: Type.Object(
       { channelId: Type.String(), ts: Type.String(), blockCount: Type.Number() },
       { additionalProperties: false },
     ),
     async execute(
-      { channelId, text, blocks, threadTs, replyBroadcast, unfurlLinks, unfurlMedia },
+      { channelId, text, blocks, threadTs, replyBroadcast, unfurlLinks, unfurlMedia, metadata },
       config,
       context,
     ) {
@@ -411,6 +419,7 @@ export const messagingTools = (tool: ToolFactory) => [
       };
       if (threadTs) body.thread_ts = threadTs;
       if (threadTs && replyBroadcast) body.reply_broadcast = true;
+      if (metadata) body.metadata = toSlackMetadata(metadata);
       const data = await callSlack(
         "chat.postMessage",
         resolveToken(config, "bot"),
@@ -431,19 +440,17 @@ export const messagingTools = (tool: ToolFactory) => [
       ts: Type.String({ description: "Message timestamp from slack_blocks_send." }),
       text: Type.String({ description: "Updated plain-text notification fallback." }),
       blocks: blocksSchema,
+      metadata: metadataParam,
     }),
     outputSchema: Type.Object(
       { channelId: Type.String(), ts: Type.String(), blockCount: Type.Number() },
       { additionalProperties: false },
     ),
-    async execute({ channelId, ts, text, blocks }, config, context) {
+    async execute({ channelId, ts, text, blocks, metadata }, config, context) {
       context.signal?.throwIfAborted();
-      const data = await callSlack(
-        "chat.update",
-        resolveToken(config, "bot"),
-        { channel: channelId, ts, text, blocks },
-        context,
-      );
+      const body: Record<string, unknown> = { channel: channelId, ts, text, blocks };
+      if (metadata) body.metadata = toSlackMetadata(metadata);
+      const data = await callSlack("chat.update", resolveToken(config, "bot"), body, context);
       return { channelId, ts: String(data.ts ?? ts), blockCount: blocks.length };
     },
   }),

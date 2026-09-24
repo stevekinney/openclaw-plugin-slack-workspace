@@ -147,3 +147,25 @@ describe("slack_post_plan task status", () => {
     }
   });
 });
+
+describe("metadata parameter", () => {
+  const metadata = { eventType: "openclaw_card_v1", eventPayload: { taskId: "T-1" } };
+  const cases: [string, Record<string, unknown>][] = [
+    ["slack_post_table", { channelId: "C0TEST", caption: "T", columns: ["a"], rows: [["1"]] }],
+    ["slack_post_plan", { channelId: "C0TEST", title: "P", tasks: [{ title: "x", status: "pending" }] }],
+    ["slack_post_chart", { channelId: "C0TEST", title: "C", chartType: "pie", segments: [{ label: "a", value: 1 }] }],
+    ["slack_blocks_send", { channelId: "C0TEST", text: "t", blocks: [{ type: "divider" }] }],
+    ["slack_blocks_update", { channelId: "C0TEST", ts: "1.2", text: "t", blocks: [{ type: "divider" }] }],
+  ];
+
+  it.each(cases)("%s accepts optional metadata", (name, params) => {
+    expect(accepts(name, params)).toBe(true);
+    expect(accepts(name, { ...params, metadata })).toBe(true);
+  });
+
+  it.each(cases)("%s rejects malformed metadata", (name, params) => {
+    expect(accepts(name, { ...params, metadata: { eventPayload: {} } })).toBe(false);
+    expect(accepts(name, { ...params, metadata: { ...metadata, eventType: "has spaces" } })).toBe(false);
+    expect(accepts(name, { ...params, metadata: { ...metadata, extra: 1 } })).toBe(false);
+  });
+});
