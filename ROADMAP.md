@@ -81,29 +81,28 @@ search) — it must not re-implement what the channel plugin already does.**
 
 ## How to run this roadmap
 
-- **This directory is not yet a git repository.** Before pointing
-  `ralph-pipeline` at this file: `git init`, commit the current tree, create
-  the GitHub repo, add the remote, and push `main`. This is a one-time manual
-  precondition, not a task on this list — the pipeline requires an existing
-  repo with the base branch present on the remote before it can create its
-  first worktree/branch/PR.
+- **Repository:** github.com/stevekinney/openclaw-plugin-slack-workspace
+  (private), base branch `main`. Pipeline config lives in
+  `.claude/ralph-pipeline.config.md`; rules for unattended workers are in
+  `CLAUDE.md`.
+- **Checkbox states:** `- [ ]` = open, pipeline-eligible; `- [x]` = done;
+  `- [!]` = skipped/stuck by the pipeline; **`- [~]` = human-only
+  (`[MANUAL]`/`[DEFERRED]`) — invisible to the pipeline's task picker; check
+  these off by hand (change to `- [x]`) once done.**
 - The pipeline reads `- [ ]` checkbox lines top to bottom and works one task
   at a time. **Tasks are ordered so earlier tiers unblock later ones** — don't
   skip ahead of a task's `Depends on:` line.
 - **Tasks titled `[MANUAL]` are not code changes.** They're edits to
   `~/.openclaw/openclaw.json`, the Slack app's manifest/settings on
   api.slack.com, or `openclaw automations`/`openclaw` CLI operations run by a
-  human with access to those systems. Do not hand these to the automated
-  pipeline — strip them from (or have the pipeline skip past) the task file it
-  runs against, and check them off by hand once done. They are deliberately
+  human with access to those systems. They are marked `- [~]` so the
+  automated pipeline never picks them up; check them off by hand once done. They are deliberately
   the last eight checkboxes in the file — **O-06** through **O-12**, plus
   **H-03** (the live webhook-bridge verification, which is `[MANUAL]` even
   though its ID prefix is `H` because it belongs with the other manual tasks
   in this section, not with H-01/H-02 back in Tier 3) — placed after every
-  automatable task (69 of the 77 total checkboxes), so a pipeline run that
-  works straight through will exhaust all the code work first; when it
-  reaches O-06 it will stall or skip depending on `on_stuck` — that's
-  expected, not a bug, and is the point to stop and hand the rest to a human.
+  automatable task (69 of the 77 total checkboxes), and the pipeline
+  stops once the code work is exhausted.
   (H-01 itself, unlike H-03, is fully automatable — it only writes a recipe
   doc from Slack's and OpenClaw's documented behavior, with no live run
   required; see H-01's own text.)
@@ -920,7 +919,7 @@ than back in Tier 3 with H-01/H-02 because it's the one Tier-3-Webhooks task
 that's a live, browser-driven verification, not code or a doc — see H-03 and
 "How to run this roadmap" above.)
 
-- [ ] **O-06: [MANUAL] Set gateway.publicOrigin so Slack cards get an "Open in OpenClaw" link** — `~/.openclaw/openclaw.json`'s `gateway` block sets `mode`/`auth`/`reload` but not `publicOrigin`. Progress cards, the Block Kit session card, and task-completion notifications all gain an "Open in OpenClaw"/"Inspect" link only when `publicOrigin` is set and the Control UI is enabled.
+- [~] **O-06: [MANUAL] Set gateway.publicOrigin so Slack cards get an "Open in OpenClaw" link** — `~/.openclaw/openclaw.json`'s `gateway` block sets `mode`/`auth`/`reload` but not `publicOrigin`. Progress cards, the Block Kit session card, and task-completion notifications all gain an "Open in OpenClaw"/"Inspect" link only when `publicOrigin` is set and the Control UI is enabled.
   - Why: a one-line config change unlocks a link OpenClaw already knows how to render.
   - Scope(s) & token type: n/a (host config).
   - API methods: n/a.
@@ -930,7 +929,7 @@ that's a live, browser-driven verification, not code or a doc — see H-03 and
   - Tests: n/a (manual verification).
   - Size: S
 
-- [ ] **O-07: [MANUAL] Configure approvals.plugin routing for Slack** — `~/.openclaw/openclaw.json` configures `channels.slack.execApprovals` for host *exec* approvals, but there is no `approvals.plugin` block or `channels.slack.allowFrom` for *plugin* approvals — a separately-configured surface. Once O-02 ships, plugin approval prompts have no route configured and will report "no connected approval surface can resolve it."
+- [~] **O-07: [MANUAL] Configure approvals.plugin routing for Slack** — `~/.openclaw/openclaw.json` configures `channels.slack.execApprovals` for host *exec* approvals, but there is no `approvals.plugin` block or `channels.slack.allowFrom` for *plugin* approvals — a separately-configured surface. Once O-02 ships, plugin approval prompts have no route configured and will report "no connected approval surface can resolve it."
   - Why: without this, O-02's permission requests silently fail to render anywhere.
   - Scope(s) & token type: n/a (host config).
   - API methods: n/a.
@@ -940,7 +939,7 @@ that's a live, browser-driven verification, not code or a doc — see H-03 and
   - Tests: n/a (manual verification).
   - Size: S
 
-- [ ] **O-08: [MANUAL] Point existing Slack-delivering automations at the plugin's structured tools** — `openclaw automations list` shows recurring cron jobs delivering to Slack via plain-text `announce` today. Rewrite at least one recurring digest job's prompt to call `slack_post_table`/`slack_canvas_edit(append)` and reuse `updateTs` so N future messages become one edited card.
+- [~] **O-08: [MANUAL] Point existing Slack-delivering automations at the plugin's structured tools** — `openclaw automations list` shows recurring cron jobs delivering to Slack via plain-text `announce` today. Rewrite at least one recurring digest job's prompt to call `slack_post_table`/`slack_canvas_edit(append)` and reuse `updateTs` so N future messages become one edited card.
   - Why: puts already-shipped plugin capability to work with zero plugin-code changes — only automation prompt/config edits via `openclaw automations update`. See **D-03**, which writes this pattern up so it's discoverable beyond the one automation this task touches by hand.
   - Scope(s) & token type: n/a (automation config).
   - API methods: n/a (automation prompt change; the automation itself calls this plugin's existing tools at runtime).
@@ -950,7 +949,7 @@ that's a live, browser-driven verification, not code or a doc — see H-03 and
   - Tests: n/a (operational change, verified by observing the next run).
   - Size: S
 
-- [ ] **O-09: [MANUAL] Review ambient-room-event configuration for the two open Slack channels** — `~/.openclaw/openclaw.json` sets `requireMention: false` for two channels under `groupPolicy: "open"` with no `messages.groupChat.unmentionedInbound: "room_event"` override, meaning the agent replies to every unmentioned message in those channels rather than treating them as ambient context. Confirm this is intentional, or set `unmentionedInbound: "room_event"` + `visibleReplies: "message_tool"`, and confirm the `main` agent's effective tool profile includes the `message` tool (it ships in the `messaging` profile, not `minimal`/`coding`).
+- [~] **O-09: [MANUAL] Review ambient-room-event configuration for the two open Slack channels** — `~/.openclaw/openclaw.json` sets `requireMention: false` for two channels under `groupPolicy: "open"` with no `messages.groupChat.unmentionedInbound: "room_event"` override, meaning the agent replies to every unmentioned message in those channels rather than treating them as ambient context. Confirm this is intentional, or set `unmentionedInbound: "room_event"` + `visibleReplies: "message_tool"`, and confirm the `main` agent's effective tool profile includes the `message` tool (it ships in the `messaging` profile, not `minimal`/`coding`).
   - Why: this is either a deliberate choice or an unnoticed default that makes the agent noisier in those two channels than intended.
   - Scope(s) & token type: n/a (host config).
   - API methods: n/a.
@@ -960,7 +959,7 @@ that's a live, browser-driven verification, not code or a doc — see H-03 and
   - Tests: n/a (manual verification).
   - Size: S
 
-- [ ] **O-10: [MANUAL] Register message-metadata event_type(s) in the Slack app manifest and reinstall** — Per Slack's docs (docs.slack.dev/messaging/message-metadata/), apps must register metadata schemas under the app manifest's `metadata.event_subscriptions` before `chat.postMessage`/`chat.update`'s `metadata` field does anything — unregistered metadata is silently dropped with a warning, not an error. `Bowie`'s manifest has no `metadata.event_subscriptions` today. Add the event_type(s) **M-01** uses (e.g. `openclaw_card_v1`, or whatever name that task settles on) to the manifest on api.slack.com and reinstall the app to `lostgradient`.
+- [~] **O-10: [MANUAL] Register message-metadata event_type(s) in the Slack app manifest and reinstall** — Per Slack's docs (docs.slack.dev/messaging/message-metadata/), apps must register metadata schemas under the app manifest's `metadata.event_subscriptions` before `chat.postMessage`/`chat.update`'s `metadata` field does anything — unregistered metadata is silently dropped with a warning, not an error. `Bowie`'s manifest has no `metadata.event_subscriptions` today. Add the event_type(s) **M-01** uses (e.g. `openclaw_card_v1`, or whatever name that task settles on) to the manifest on api.slack.com and reinstall the app to `lostgradient`.
   - Why: without this, **M-01**'s write path and **M-02**'s read path both appear to work (Slack calls return `ok: true`) while metadata is silently discarded — a live-verification blocker that must be done by a human with app-manifest access, not the automated pipeline.
   - Scope(s) & token type: n/a (Slack app manifest/settings).
   - API methods: n/a (api.slack.com manifest editor + app reinstall).
@@ -970,7 +969,7 @@ that's a live, browser-driven verification, not code or a doc — see H-03 and
   - Tests: n/a (manual verification).
   - Size: S
 
-- [ ] **O-12: [MANUAL] Add the channels:join scope, reinstall, and decide on join introductions** — Add `channels:join` to the Bowie manifest's bot scopes on api.slack.com and reinstall the app to `lostgradient`, so **S-07** can call `conversations.join`. Also decide whether auto-joins should announce themselves: with `groupPolicy: "open"`, the channel plugin posts an introduction in every channel the bot joins unless `channels.slack.joinIntro` is set to `false` in `~/.openclaw/openclaw.json`.
+- [~] **O-12: [MANUAL] Add the channels:join scope, reinstall, and decide on join introductions** — Add `channels:join` to the Bowie manifest's bot scopes on api.slack.com and reinstall the app to `lostgradient`, so **S-07** can call `conversations.join`. Also decide whether auto-joins should announce themselves: with `groupPolicy: "open"`, the channel plugin posts an introduction in every channel the bot joins unless `channels.slack.joinIntro` is set to `false` in `~/.openclaw/openclaw.json`.
   - Why: `conversations.join` requires `channels:join` for bot tokens (docs.slack.dev, verified 2026-09-23); the app does not request it today. Adding a scope is compatible with the deferred-trimming decision.
   - Scope(s) & token type: adds `channels:join` (bot).
   - API methods: n/a (manifest editor + reinstall).
@@ -980,7 +979,7 @@ that's a live, browser-driven verification, not code or a doc — see H-03 and
   - Tests: n/a (manual verification).
   - Size: S
 
-- [ ] **O-11: [MANUAL] [DEFERRED] Trim dead/low-value scopes from the manifest and reinstall** — **Deferred by the owner on 2026-09-23: do not execute until explicitly re-opened; the owner may keep some of these scopes for new features.** **Scope hygiene** below identifies several scopes with no live code path and no scheduled justification: `workflow.steps:execute` (permanently retired Slack feature), `reminders:read`/`reminders:write` (superseded by **R-01**'s bot-token approach), `incoming-webhook` (redundant with `chat:write`), and `users:write` (only affects bot presence, already covered by `bot_user.always_online`). Remove these from the Slack app manifest on api.slack.com and reinstall.
+- [~] **O-11: [MANUAL] [DEFERRED] Trim dead/low-value scopes from the manifest and reinstall** — **Deferred by the owner on 2026-09-23: do not execute until explicitly re-opened; the owner may keep some of these scopes for new features.** **Scope hygiene** below identifies several scopes with no live code path and no scheduled justification: `workflow.steps:execute` (permanently retired Slack feature), `reminders:read`/`reminders:write` (superseded by **R-01**'s bot-token approach), `incoming-webhook` (redundant with `chat:write`), and `users:write` (only affects bot presence, already covered by `bot_user.always_online`). Remove these from the Slack app manifest on api.slack.com and reinstall.
   - Why: **Scope hygiene**'s findings are otherwise permanent prose with no execution path, unlike O-06..O-10, which are actionable; this closes that gap so least-privilege (guiding principle 2) is actually enforced, not just documented.
   - Scope(s) & token type: n/a (Slack app manifest/settings).
   - API methods: n/a.
@@ -990,7 +989,7 @@ that's a live, browser-driven verification, not code or a doc — see H-03 and
   - Tests: n/a (manual verification).
   - Size: S
 
-- [ ] **H-03: [MANUAL] Live-verify the webhook bridge recipe end-to-end** — Build the actual Workflow Builder workflow described in **H-01**'s recipe doc in `lostgradient` (webhook trigger → "Send a webhook" step → "Extract JSON" → message step showing the agent's reply) and confirm it works, once a public Gateway origin exists.
+- [~] **H-03: [MANUAL] Live-verify the webhook bridge recipe end-to-end** — Build the actual Workflow Builder workflow described in **H-01**'s recipe doc in `lostgradient` (webhook trigger → "Send a webhook" step → "Extract JSON" → message step showing the agent's reply) and confirm it works, once a public Gateway origin exists.
   - Why: this is the live, human/browser-dependent half of H-01 that an automated, code-focused pipeline cannot perform — building and clicking through a Workflow Builder workflow in Slack's web UI.
   - Scope(s) & token type: none new.
   - API methods: none (Workflow Builder UI + existing OpenClaw Gateway endpoint).
