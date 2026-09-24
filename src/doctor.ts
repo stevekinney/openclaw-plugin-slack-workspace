@@ -43,6 +43,7 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind | "none"; scopes: st
   slack_canvas_from_thread: { token: "bot", scopes: ["channels:history", "canvases:write"] },
   slack_bookmark_list: { token: "bot", scopes: ["bookmarks:read"] },
   slack_bookmark_add: { token: "bot", scopes: ["bookmarks:write"] },
+  slack_bookmark_edit: { token: "bot", scopes: ["bookmarks:write"] },
   slack_bookmark_remove: { token: "bot", scopes: ["bookmarks:write"] },
   slack_channel_create: { token: "bot", scopes: ["channels:manage"] },
   // Every channel tool but create reads conversations.info first to refuse private channels.
