@@ -64,6 +64,7 @@ const gated: Array<[string, Record<string, unknown>, string]> = [
     { listId: "F0LIST", itemIds: ["Rec0A", "Rec0B"] },
     "slackLists.items.deleteMultiple",
   ],
+  ["slack_remote_file_remove", { externalId: "linear-ENG-123" }, "files.remote.remove"],
 ];
 
 describe("approval registry", () => {
@@ -77,6 +78,7 @@ describe("approval registry", () => {
       "slack_channel_rename",
       "slack_list_item_delete",
       "slack_list_items_delete_multiple",
+      "slack_remote_file_remove",
       "slack_scheduled_cancel",
     ]);
   });

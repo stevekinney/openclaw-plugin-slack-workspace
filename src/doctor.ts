@@ -86,6 +86,11 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind | "none"; scopes: st
   slack_workflow_trigger_run: { token: "none", scopes: [] },
   slack_usergroup_list: { token: "bot", scopes: ["usergroups:read"] },
   slack_usergroup_members: { token: "bot", scopes: ["usergroups:read"] },
+  // files.remote.* rejects user tokens.
+  slack_remote_file_add: { token: "bot", scopes: ["remote_files:write"] },
+  slack_remote_file_update: { token: "bot", scopes: ["remote_files:write"] },
+  slack_remote_file_remove: { token: "bot", scopes: ["remote_files:write"] },
+  slack_remote_file_share: { token: "bot", scopes: ["remote_files:share"] },
 };
 
 export type TokenAudit = {

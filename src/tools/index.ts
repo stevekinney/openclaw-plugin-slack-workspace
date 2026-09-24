@@ -8,6 +8,7 @@ import { identityTools } from "./identity.js";
 import { listTools } from "./lists.js";
 import { messagingTools } from "./messaging.js";
 import { schedulingTools } from "./scheduling.js";
+import { remoteFileTools } from "./remote-files.js";
 import { searchTools } from "./search.js";
 import { usergroupTools } from "./usergroups.js";
 import { workflowTools } from "./workflows.js";
@@ -26,4 +27,5 @@ export const tools = [
   ...assistantTools(defineTool),
   ...workflowTools(defineTool),
   ...usergroupTools(defineTool),
+  ...remoteFileTools(defineTool),
 ];
