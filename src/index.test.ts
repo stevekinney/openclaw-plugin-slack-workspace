@@ -35,6 +35,8 @@ describe("slack-workspace", () => {
       "slack_channel_set_topic",
       "slack_channel_set_purpose",
       "slack_channel_invite",
+      "slack_channel_join",
+      "slack_channel_leave",
       "slack_channel_kickoff",
     ]);
   });

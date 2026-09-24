@@ -39,5 +39,7 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
   slack_channel_set_topic: idempotentWrite,
   slack_channel_set_purpose: idempotentWrite,
   slack_channel_invite: write,
+  slack_channel_join: idempotentWrite,
+  slack_channel_leave: idempotentWrite,
   slack_channel_kickoff: write,
 };

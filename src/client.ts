@@ -5,6 +5,10 @@ export type SlackResponse = Record<string, unknown> & { ok?: boolean; error?: st
 export type PluginConfig = {
   botToken?: string | { id?: string };
   userToken?: string | { id?: string };
+  /** Join a public channel and retry when a bot-token call hits `not_in_channel`. Default true. */
+  autoJoin?: boolean;
+  /** Channel IDs never to auto-join. */
+  autoJoinDeny?: string[];
 };
 
 /**
@@ -62,8 +66,27 @@ type PluginLogger = {
   warn: (message: string) => void;
 };
 
+/** Per-tool-call auto-join state: the plugin config, and the channels joined so far. */
+export type AutoJoinState = { config: PluginConfig; joined: Set<string> };
+
 /** The slice of the tool execution context the Slack client needs. */
-export type SlackCallContext = { signal?: AbortSignal; api?: { logger?: PluginLogger } };
+export type SlackCallContext = {
+  signal?: AbortSignal;
+  api?: { logger?: PluginLogger };
+  /** Set by the tool runner; without it, `not_in_channel` is never auto-joined. */
+  autoJoin?: AutoJoinState;
+};
+
+/** A Slack API error, keeping Slack's bare error code alongside the readable message. */
+export class SlackApiError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+  ) {
+    super(message);
+    this.name = "SlackApiError";
+  }
+}
 
 /** Mirrors the bundled Slack channel plugin: retry a rate-limited call at most twice. */
 const MAX_RATE_LIMIT_RETRIES = 2;
@@ -81,6 +104,8 @@ const ERROR_HINTS: Record<string, string> = {
   canvas_editing_locked: "the canvas is locked for editing; try again shortly",
   invalid_primary_column: "a list's primary column must be a text column",
   over_column_maximum: "the list has more columns than Slack allows",
+  not_in_channel:
+    "the bot is not a member of this channel: join a public channel with slack_channel_join, or have someone `/invite @OpenClaw`",
 };
 
 function retryAfterSeconds(response: Response): number {
@@ -110,8 +135,134 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
  * Rate-limited calls (HTTP 429 or a `ratelimited` body) are retried up to twice,
  * honoring `Retry-After`. Each call logs its method, elapsed time, and outcome —
  * never the token or the response body.
+ *
+ * A bot-token call that fails with `not_in_channel` joins the channel and retries once,
+ * when `context.autoJoin` allows it (see `autoJoinTarget`). Only public channels are
+ * joined; the retry never joins again, so there are no join loops.
  */
 export async function callSlackRaw(
+  method: string,
+  token: string,
+  body: Record<string, unknown>,
+  context: SlackCallContext = {},
+  form = false,
+): Promise<{ data: SlackResponse; scopes: string[] }> {
+  try {
+    return await callSlackOnce(method, token, body, context, form);
+  } catch (error) {
+    const channelId = autoJoinTarget(error, method, token, body, context);
+    if (!channelId) throw error;
+    try {
+      await joinPublicChannel(channelId, token, context);
+    } catch (joinError) {
+      context.signal?.throwIfAborted();
+      throw new Error(
+        `${(error as Error).message}. Could not auto-join: ${(joinError as Error).message}`,
+        { cause: joinError },
+      );
+    }
+    context.autoJoin!.joined.add(channelId);
+    context.api?.logger?.info(`slack-workspace: auto-joined ${channelId}; retrying ${method}`);
+    try {
+      return await callSlackOnce(method, token, body, context, form);
+    } catch (retryError) {
+      context.signal?.throwIfAborted();
+      throw new Error(
+        `${(retryError as Error).message} (the bot auto-joined ${channelId} before retrying)`,
+        { cause: retryError },
+      );
+    }
+  }
+}
+
+const MEMBERSHIP_METHODS = new Set(["conversations.join", "conversations.leave"]);
+
+/** The channel to auto-join for this failed call, or undefined when auto-join doesn't apply. */
+function autoJoinTarget(
+  error: unknown,
+  method: string,
+  token: string,
+  body: Record<string, unknown>,
+  context: SlackCallContext,
+): string | undefined {
+  const state = context.autoJoin;
+  if (!state || state.config.autoJoin === false) return undefined;
+  if (!(error instanceof SlackApiError) || error.code !== "not_in_channel") return undefined;
+  if (MEMBERSHIP_METHODS.has(method)) return undefined;
+  const channel = body.channel ?? body.channel_id;
+  if (typeof channel !== "string" || !channel) return undefined;
+  if (state.config.autoJoinDeny?.includes(channel)) return undefined;
+  // Auto-join acts as the app; a user token's membership is the human's business.
+  let botToken: string;
+  try {
+    botToken = resolveToken(state.config, "bot", () => {});
+  } catch {
+    return undefined;
+  }
+  return token === botToken ? channel : undefined;
+}
+
+const inviteNeeded = (channelId: string, why: string) =>
+  new Error(
+    `Channel ${channelId} ${why}, so the bot cannot join it on its own: the bot must be invited (\`/invite @OpenClaw\`).`,
+  );
+
+/**
+ * Join a public channel with the bot token. Checks `conversations.info` first and
+ * refuses private channels, DMs, and group DMs (they need an invite) and archived
+ * channels, before `conversations.join` is ever called.
+ */
+export async function joinPublicChannel(
+  channelId: string,
+  token: string,
+  context: SlackCallContext = {},
+): Promise<{ channel: Record<string, unknown>; alreadyMember: boolean }> {
+  let channel: Record<string, unknown>;
+  try {
+    const { data } = await callSlackOnce(
+      "conversations.info",
+      token,
+      { channel: channelId },
+      context,
+      true,
+    );
+    channel = (data.channel ?? {}) as Record<string, unknown>;
+  } catch (error) {
+    // A private channel the bot isn't in is invisible to it, or needs a `groups:*` scope.
+    const hidden =
+      error instanceof SlackApiError &&
+      (error.code === "channel_not_found" || /needs scope: groups:/.test(error.message));
+    if (hidden) {
+      throw inviteNeeded(channelId, "is not visible to the bot (it may be private)");
+    }
+    throw error;
+  }
+  if (channel.is_im === true || channel.is_mpim === true) {
+    throw inviteNeeded(channelId, "is a direct message");
+  }
+  if (channel.is_private === true) throw inviteNeeded(channelId, "is a private channel");
+  if (channel.is_archived === true) {
+    throw new Error(`Channel ${channelId} is archived; unarchive it before joining.`);
+  }
+  let data: SlackResponse;
+  try {
+    ({ data } = await callSlackOnce("conversations.join", token, { channel: channelId }, context));
+  } catch (error) {
+    if (error instanceof SlackApiError && error.code === "missing_scope") {
+      throw new Error(
+        `${error.message}. Joining channels needs the bot scope \`channels:join\`, which this Slack app has not been granted yet: add it to the app manifest and reinstall (roadmap O-12).`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
+  return {
+    channel: (data.channel ?? channel) as Record<string, unknown>,
+    alreadyMember: data.warning === "already_in_channel",
+  };
+}
+
+async function callSlackOnce(
   method: string,
   token: string,
   body: Record<string, unknown>,
@@ -195,7 +346,7 @@ export async function callSlackRaw(
             : detail?.length
               ? ` — ${detail.join("; ")}`
               : "";
-      throw new Error(`Slack ${method} failed: ${error}${hint}`);
+      throw new SlackApiError(`Slack ${method} failed: ${error}${hint}`, error);
     }
 
     log("ok");

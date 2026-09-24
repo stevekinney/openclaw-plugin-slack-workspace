@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { callSlack, resolveToken, type SlackCallContext } from "../client.js";
+import { callSlack, joinPublicChannel, resolveToken, type SlackCallContext } from "../client.js";
 import type { ApprovalRule } from "../approvals.js";
 import { channelIdParam, type ToolFactory } from "../schemas.js";
 import { addBookmark, slackBookmark } from "./bookmarks.js";
@@ -94,6 +94,14 @@ const userIdsParam = (description: string) =>
 
 type KickoffStepName = "create" | "topic" | "purpose" | "invite" | "canvas" | "bookmark";
 type KickoffStep = { step: KickoffStepName; ok: boolean; error?: string };
+
+/**
+ * With the host's `groupPolicy: "open"`, every channel the bot is in counts as allowed:
+ * the agent answers @-mentions there, and the channel plugin posts one join
+ * introduction unless `channels.slack.joinIntro` is false.
+ */
+const MEMBERSHIP_NOTE =
+  "Membership has side effects: the agent will answer @-mentions in every channel it belongs to, and the Slack channel plugin posts a one-time introduction when the bot joins (unless `channels.slack.joinIntro` is false).";
 
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -252,6 +260,54 @@ export const channelTools = (tool: ToolFactory) => [
       return { channel: curateChannel(data.channel, channelId), invited: userIds };
     },
   }),
+  tool({
+    name: "slack_channel_join",
+    label: "Join Slack channel",
+    description: `Join a public Slack channel as the bot. Private channels, DMs, and group DMs are refused: the bot must be invited (\`/invite @OpenClaw\`). Archived channels are refused. Other tools already join a public channel on their own when Slack answers \`not_in_channel\` (their result then carries \`autoJoined: true\`), so call this only to join ahead of time. ${MEMBERSHIP_NOTE}`,
+    parameters: Type.Object({
+      channelId: channelIdParam("Public channels only; private channels need an invite."),
+    }),
+    outputSchema: Type.Object(
+      {
+        channel: slackChannel,
+        alreadyMember: Type.Boolean({ description: "True if the bot was already in the channel." }),
+      },
+      { additionalProperties: false },
+    ),
+    async execute({ channelId }, config, context) {
+      context.signal?.throwIfAborted();
+      const token = resolveToken(config);
+      const { channel, alreadyMember } = await joinPublicChannel(channelId, token, context);
+      return { channel: curateChannel(channel, channelId), alreadyMember };
+    },
+  }),
+
+  tool({
+    name: "slack_channel_leave",
+    label: "Leave Slack channel",
+    description:
+      "Remove the bot from a public Slack channel. The agent stops answering @-mentions there. Private channels are refused (they need `groups:write`).",
+    parameters: Type.Object({
+      channelId: publicChannelIdParam(),
+    }),
+    outputSchema: Type.Object(
+      {
+        channelId: Type.String(),
+        left: Type.Boolean({ description: "False if the bot was not a member to begin with." }),
+      },
+      { additionalProperties: false },
+    ),
+    async execute({ channelId }, config, context) {
+      context.signal?.throwIfAborted();
+      const token = resolveToken(config);
+      await requirePublicChannel(channelId, token, "groups:write", context);
+      const data = await publicOnly(channelId, "groups:write", () =>
+        callSlack("conversations.leave", token, { channel: channelId }, context),
+      );
+      return { channelId, left: data.not_in_channel !== true };
+    },
+  }),
+
   tool({
     name: "slack_channel_kickoff",
     label: "Kick off Slack channel",

@@ -1,7 +1,7 @@
 {
   "id": "slack-workspace",
   "name": "Slack Workspace",
-  "description": "Slack workspace tools: identity and message scheduling, search, structured messaging (tables, plans, charts), raw Block Kit messages, canvases, channel bookmarks, and public-channel lifecycle (create, archive, rename, topic, purpose, invite, one-call kickoff).",
+  "description": "Slack workspace tools: identity and message scheduling, search, structured messaging (tables, plans, charts), raw Block Kit messages, canvases, channel bookmarks, and public-channel lifecycle (create, archive, rename, topic, purpose, invite, join, leave, one-call kickoff).",
   "version": "0.1.0",
   "configSchema": {
     "type": "object",
@@ -57,6 +57,17 @@
           }
         ],
         "description": "Slack user token (xoxp-) or a SecretRef. Required by search, which rejects bot tokens. Falls back to SLACK_USER_TOKEN."
+      },
+      "autoJoin": {
+        "type": "boolean",
+        "description": "When a bot-token call fails with not_in_channel on a public channel, join it once and retry. Default true."
+      },
+      "autoJoinDeny": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Channel IDs the bot must never auto-join, e.g. [\"C0123ABCD\"]."
       }
     },
     "additionalProperties": false
@@ -114,6 +125,8 @@
       "slack_channel_set_topic",
       "slack_channel_set_purpose",
       "slack_channel_invite",
+      "slack_channel_join",
+      "slack_channel_leave",
       "slack_channel_kickoff"
     ]
   },
@@ -268,6 +281,20 @@
     "slack_channel_invite": {
       "sideEffecting": true,
       "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_channel_join": {
+      "sideEffecting": true,
+      "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_channel_leave": {
+      "sideEffecting": true,
+      "replaySafe": true,
       "profiles": [
         "messaging"
       ]
