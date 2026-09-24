@@ -58,6 +58,7 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind; scopes: string[] }>
       "bookmarks:write",
     ],
   },
+  slack_list_create: { token: "bot", scopes: ["lists:write"] },
 };
 
 export type TokenAudit = {

@@ -22,6 +22,7 @@ const BOT_SCOPES = [
   "channels:write.topic",
   "channels:write.invites",
   "files:read",
+  "lists:write",
 ];
 const USER_SCOPES = ["search:read"];
 
@@ -70,6 +71,7 @@ describe("auditScopes", () => {
           "channels:write.topic",
           "chat:write",
           "files:read",
+          "lists:write",
         ],
       });
       // Only the read-only auth.test, once per token.

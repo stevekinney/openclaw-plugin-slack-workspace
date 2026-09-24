@@ -43,6 +43,10 @@ Most tools don't need an explicit join. When a bot-token call fails with `not_in
 
 `conversations.join` needs the `channels:join` bot scope, which the Slack app doesn't have until roadmap task O-12 adds it. Until then, a join fails with an error naming the scope. Keep in mind what membership does on the host side: with the channel plugin's `groupPolicy: "open"`, every channel the bot joins becomes one where the agent answers @-mentions, and the channel plugin posts an introduction on join unless `channels.slack.joinIntro` is `false`.
 
+## Lists
+
+`slack_list_create` wraps `slackLists.create` with the bot token and the `lists:write` scope. Pass a `schema` of typed columns (`key`, `name`, `type`, optional `primary`, and Slack's column `options` passed through verbatim), or copy an existing list's columns with `copyFromListId`, adding `includeCopiedListRecords` to copy its items too. Slack rejects a call that sets both `schema` and `copyFromListId`, so the tool refuses it before calling Slack. `todoMode` adds Slack's completed, assignee, and due-date columns. Slack has no method to add, remove, or retype columns after creation, so the schema has to cover every column up front. The result carries the new `listId` and each column's `id`, which later item writes need.
+
 ## Scope doctor
 
 `openclaw slack-workspace doctor` calls the read-only `auth.test` once per configured token and compares the scopes Slack actually granted against what each tool needs. Missing scopes are listed with the tools they break. This catches a Slack app whose manifest gained scopes that were never reinstalled. Pass `--json` for machine-readable output. The command exits non-zero on any gap, unavailable token, or rejected token. The per-tool requirements live in `TOOL_SCOPES` in `src/doctor.ts`. When you add a tool, add its entry there; a test fails if one is missing.
