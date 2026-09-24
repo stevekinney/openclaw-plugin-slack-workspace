@@ -15,6 +15,18 @@ async function canvasUrl(token: string, canvasId: string, context: SlackCallCont
   return workspace ? canvasPermalink(workspace, canvasId) : null;
 }
 
+/** Section types `canvases.sections.lookup` can filter on. */
+const SECTION_TYPES = [
+  "h1",
+  "h2",
+  "h3",
+  "any_header",
+  "table",
+  "list",
+  "callout",
+  "blockquote",
+] as const;
+
 /** What `createCanvas` returns. */
 export const createdCanvasSchema = Type.Object(
   {
@@ -194,9 +206,16 @@ export const canvasTools = (tool: ToolFactory) => [
     name: "slack_canvas_sections",
     label: "Look up Slack canvas sections",
     description:
-      "List sections of a canvas, optionally filtered by heading level, to get section IDs for targeted edits.",
+      "Find canvas sections by type (e.g. heading level) and/or text, to get section IDs for targeted edits. Set sectionTypes, containsText, or both.",
     parameters: Type.Object({
       canvasId: Type.String({ description: "Canvas ID." }),
+      sectionTypes: Type.Optional(
+        Type.Array(Type.Union(SECTION_TYPES.map((type) => Type.Literal(type))), {
+          minItems: 1,
+          uniqueItems: true,
+          description: "Only return sections of these types. any_header matches h1, h2, and h3.",
+        }),
+      ),
       containsText: Type.Optional(
         Type.String({ description: "Only return sections containing this text." }),
       ),
@@ -209,10 +228,15 @@ export const canvasTools = (tool: ToolFactory) => [
       },
       { additionalProperties: false },
     ),
-    async execute({ canvasId, containsText }, config, context) {
+    async execute({ canvasId, sectionTypes, containsText }, config, context) {
       context.signal?.throwIfAborted();
+      // Slack requires at least one criterion; fail clearly instead of sending `criteria: {}`.
+      if (!sectionTypes?.length && !containsText) {
+        throw new Error("slack_canvas_sections needs sectionTypes or containsText.");
+      }
       const token = resolveToken(config);
       const criteria: Record<string, unknown> = {};
+      if (sectionTypes?.length) criteria.section_types = sectionTypes;
       if (containsText) criteria.contains_text = containsText;
       const data = await callSlack(
         "canvases.sections.lookup",
