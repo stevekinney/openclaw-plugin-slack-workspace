@@ -167,7 +167,11 @@ export const canvasTools = (tool: ToolFactory) => [
       ),
     }),
     outputSchema: Type.Object(
-      { sections: Type.Array(Type.Object({ id: Type.String() })) },
+      {
+        sections: Type.Array(
+          Type.Object({ id: Type.String() }, { additionalProperties: false }),
+        ),
+      },
       { additionalProperties: false },
     ),
     async execute({ canvasId, containsText }, config, context) {
@@ -181,7 +185,9 @@ export const canvasTools = (tool: ToolFactory) => [
         { canvas_id: canvasId, criteria },
         context,
       );
-      return { sections: data.sections ?? [] };
+      // Curated to the ID (see "Output shaping" in schemas.ts): it's all an edit needs.
+      const sections = (data.sections ?? []) as { id?: unknown }[];
+      return { sections: sections.map((section) => ({ id: String(section.id ?? "") })) };
     },
   }),
 ];
