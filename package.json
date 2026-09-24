@@ -6,8 +6,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "plugin:build": "npm run build && openclaw plugins build --entry ./dist/index.js && node ./scripts/patch-manifest.mjs",
+    "plugin:check": "npm run build && openclaw plugins build --check --entry ./dist/index.js",
     "plugin:validate": "npm run build && openclaw plugins validate --entry ./dist/index.js",
-    "test": "vitest run --config ./vitest.config.ts"
+    "test": "vitest run --config ./vitest.config.ts",
+    "ci": "npm run plugin:check && openclaw plugins validate --entry ./dist/index.js && npm test"
   },
   "files": [
     "dist",
