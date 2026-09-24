@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import { callSlack, resolveToken } from "../client.js";
 import type { ApprovalRule } from "../approvals.js";
+import { cursorParams, toPage, walkPages } from "../pagination.js";
 import { blocksSchema, channelIdParam, threadTsParam, type ToolFactory } from "../schemas.js";
 
 export const schedulingTools = (tool: ToolFactory) => [
@@ -69,9 +70,15 @@ export const schedulingTools = (tool: ToolFactory) => [
     name: "slack_scheduled_list",
     label: "List scheduled Slack messages",
     description:
-      "List messages this app has scheduled but not yet posted. Use to confirm a schedule landed or to find an ID to cancel.",
+      "List messages this app has scheduled but not yet posted. Use to confirm a schedule landed or to find an ID to cancel. Follows Slack's pages automatically; if `hasMore` is still true, call again with the returned `cursor` for the rest.",
     parameters: Type.Object({
       channelId: Type.Optional(channelIdParam("Limit to this channel; omit for all channels.")),
+      cursor: Type.Optional(
+        Type.String({ description: "Resume from the `cursor` a previous call returned." }),
+      ),
+      limit: Type.Optional(
+        Type.Integer({ minimum: 1, maximum: 100, description: "Messages per Slack page." }),
+      ),
     }),
     outputSchema: Type.Object(
       {
@@ -84,28 +91,33 @@ export const schedulingTools = (tool: ToolFactory) => [
             text: Type.Optional(Type.String()),
           }),
         ),
+        cursor: Type.Optional(Type.String()),
+        hasMore: Type.Boolean(),
       },
       { additionalProperties: false },
     ),
-    async execute({ channelId }, config, context) {
+    async execute({ channelId, cursor, limit }, config, context) {
       context.signal?.throwIfAborted();
-      const body: Record<string, unknown> = {};
-      if (channelId) body.channel = channelId;
-      const data = await callSlack(
-        "chat.scheduledMessages.list",
-        resolveToken(config, "bot"),
-        body,
-        context,
+      const token = resolveToken(config, "bot");
+      const page = await walkPages(
+        async (request) => {
+          const body: Record<string, unknown> = { ...cursorParams(request) };
+          if (channelId) body.channel = channelId;
+          const data = await callSlack("chat.scheduledMessages.list", token, body, context);
+          return toPage<Record<string, unknown>>(data, "scheduled_messages");
+        },
+        { cursor, limit, signal: context.signal },
       );
-      const scheduled = (data.scheduled_messages ?? []) as Record<string, unknown>[];
       return {
-        scheduled: scheduled.map((entry) => ({
+        scheduled: page.items.map((entry) => ({
           id: entry.id,
           channelId: entry.channel_id,
           postAt: entry.post_at,
           postAtIso: new Date(Number(entry.post_at ?? 0) * 1000).toISOString(),
           text: entry.text,
         })),
+        ...(page.cursor ? { cursor: page.cursor } : {}),
+        hasMore: page.hasMore,
       };
     },
   }),

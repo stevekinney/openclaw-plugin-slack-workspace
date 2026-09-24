@@ -265,6 +265,69 @@ describe("slack_schedule_message postAt bounds", () => {
   });
 });
 
+describe("slack_scheduled_list pagination", () => {
+  const entry = (id: string) => ({ id, channel_id: "C0TEST", post_at: 1790000000, text: id });
+  const pages: Record<string, Record<string, unknown>> = {
+    "": {
+      ok: true,
+      scheduled_messages: [entry("Q1"), entry("Q2")],
+      response_metadata: { next_cursor: "page2" },
+    },
+    page2: { ok: true, scheduled_messages: [entry("Q3")], response_metadata: { next_cursor: "" } },
+  };
+  const byCursor = (call: { body: Record<string, unknown> }) =>
+    pages[String(call.body.cursor ?? "")];
+
+  it("follows next_cursor across pages until exhausted", async () => {
+    await withMockFetch(byCursor, async (calls) => {
+      const result = await runTool("slack_scheduled_list", { channelId: "C0TEST" });
+      expect(calls.map((call) => call.body)).toEqual([
+        { channel: "C0TEST" },
+        { channel: "C0TEST", cursor: "page2" },
+      ]);
+      expect(result).toEqual({
+        scheduled: ["Q1", "Q2", "Q3"].map((id) => ({
+          id,
+          channelId: "C0TEST",
+          postAt: 1790000000,
+          postAtIso: "2026-09-21T14:13:20.000Z",
+          text: id,
+        })),
+        hasMore: false,
+      });
+    });
+  });
+
+  it("forwards cursor and limit, and resumes from a caller's cursor", async () => {
+    await withMockFetch(byCursor, async (calls) => {
+      const result = await runTool("slack_scheduled_list", { cursor: "page2", limit: 50 });
+      expect(calls.map((call) => call.body)).toEqual([{ cursor: "page2", limit: 50 }]);
+      expect(result).toMatchObject({ scheduled: [{ id: "Q3" }], hasMore: false });
+    });
+  });
+
+  it("returns a cursor with hasMore when the page cap is reached", async () => {
+    let n = 0;
+    await withMockFetch(
+      () => ({
+        ok: true,
+        scheduled_messages: [entry(`Q${n}`)],
+        response_metadata: { next_cursor: `c${++n}` },
+      }),
+      async (calls) => {
+        const result = (await runTool("slack_scheduled_list", {})) as {
+          scheduled: unknown[];
+          cursor?: string;
+          hasMore: boolean;
+        };
+        expect(calls).toHaveLength(10);
+        expect(result.scheduled).toHaveLength(10);
+        expect(result).toMatchObject({ cursor: "c10", hasMore: true });
+      },
+    );
+  });
+});
+
 describe("Slack error hints", () => {
   it("names the needed scope on missing_scope", async () => {
     await withMockFetch(
