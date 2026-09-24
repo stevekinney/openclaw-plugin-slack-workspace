@@ -19,8 +19,8 @@ columns right in the `slack_list_create` call:
   that start empty. An unused column costs nothing; a missing one can't be added.
 - **Pick types carefully.** A `text` column can't become a `select` later. If you
   want filtering or colored labels, use `select` from the start.
-- **`todoMode` is the one exception.** It's the only column-related setting
-  `slackLists.update` can still change.
+- **`todo_mode` is the one exception.** It's the only column-related setting
+  `slackLists.update` can still change (`todoMode` in `slack_list_create`).
 
 If the schema turns out wrong, the only fix is a new list. `copyFromListId` copies
 columns (and with `includeCopiedListRecords`, items), but the new list has a new
