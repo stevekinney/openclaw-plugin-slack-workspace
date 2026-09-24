@@ -45,11 +45,11 @@ describe("slack-workspace", () => {
     expect(hook?.opts?.matcher).toEqual(tools.map((tool) => tool.name));
   });
 
-  it("lets every tool call through until a policy is registered", async () => {
+  it("lets non-destructive tool calls through without asking", async () => {
     const { hooks } = registerPlugin();
     const hook = hooks.find((candidate) => candidate.hookName === "before_tool_call")!;
     const decision = await hook.handler(
-      { toolName: "slack_bookmark_remove", params: { channelId: "C0TEST", bookmarkId: "Bk1" } },
+      { toolName: "slack_bookmark_add", params: { channelId: "C0TEST", title: "t", link: "l" } },
       {},
     );
     expect(decision).toBeUndefined();
