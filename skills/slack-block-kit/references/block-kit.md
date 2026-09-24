@@ -17,7 +17,7 @@ Tested by posting through `slack_blocks_send`. "Posts" = Slack accepted it in a 
 | `table` | Cells are `raw_text`. Basic; no pagination or sorting. |
 | `card` | `title`/`subtitle`/`body` are text objects (`{type:"mrkdwn",text}`), despite the field table saying "String". Max 3 action buttons. |
 | `carousel` | `elements` must each be a `card` block. Min 1, max 10. |
-| `plan` | `tasks` are task-card objects *without* `type`. Each `task_id` unique. Max 50. |
+| `plan` | `tasks` are task-card objects *without* `type`. Each `task_id` unique. Max 50. Task `status`: `pending`, `in_progress`, `complete`, `error`. |
 | `markdown` | Standard markdown, NOT Slack mrkdwn: `**bold**`, `[text](url)`, `- bullets`. 12,000 char cumulative limit. |
 | `data_table` | Rich table with pagination/sorting. `caption` is required. |
 | `data_visualization` | `pie`/`bar`/`area`/`line`. Max 2 per message. |

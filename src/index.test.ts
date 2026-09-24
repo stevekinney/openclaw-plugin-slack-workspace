@@ -100,6 +100,24 @@ describe("slack_post_table", () => {
   });
 });
 
+describe("slack_post_plan", () => {
+  it("passes every task status through to the plan block", async () => {
+    await withMockFetch(ok, async (calls) => {
+      const statuses = ["pending", "in_progress", "complete", "error"];
+      await runTool("slack_post_plan", {
+        ...target,
+        title: "Deploy",
+        tasks: statuses.map((status) => ({ title: status, status })),
+      });
+      expect(calls).toHaveLength(1);
+      expect(calls[0].body.text).toBe("Deploy — 1/4 complete");
+      const [plan] = calls[0].body.blocks as { tasks: { task_id: string; status: string }[] }[];
+      expect(plan.tasks.map((task) => task.status)).toEqual(statuses);
+      expect(plan.tasks.map((task) => task.task_id)).toEqual(["task_1", "task_2", "task_3", "task_4"]);
+    });
+  });
+});
+
 describe("slack_post_chart", () => {
   it("rejects a series whose length does not match the categories, without calling Slack", async () => {
     await withMockFetch(ok, async (calls) => {

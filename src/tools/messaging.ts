@@ -116,13 +116,18 @@ export const messagingTools = (tool: ToolFactory) => [
       tasks: Type.Array(
         Type.Object({
           title: Type.String({ description: "What this step does." }),
+          // `error` is from the task_card fields table; `pending` from the plan block's examples.
           status: Type.Union(
             [
+              Type.Literal("pending"),
               Type.Literal("in_progress"),
               Type.Literal("complete"),
               Type.Literal("error"),
             ],
-            { description: "Step state." },
+            {
+              description:
+                "Step state: `pending` (not started), `in_progress`, `complete`, or `error` (failed).",
+            },
           ),
           details: Type.Optional(Type.String({ description: "What the step is doing." })),
           output: Type.Optional(Type.String({ description: "What the step produced." })),

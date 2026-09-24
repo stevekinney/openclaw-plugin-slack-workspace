@@ -123,3 +123,23 @@ describe("slack_post_chart length limits", () => {
     );
   });
 });
+
+describe("slack_post_plan task status", () => {
+  const plan = (status: string) => ({
+    channelId: "C0TEST",
+    title: "Deploy",
+    tasks: [{ title: "Build", status }],
+  });
+
+  it("accepts pending, in_progress, complete, and error", () => {
+    for (const status of ["pending", "in_progress", "complete", "error"]) {
+      expect(accepts("slack_post_plan", plan(status)), status).toBe(true);
+    }
+  });
+
+  it("rejects statuses Slack does not document", () => {
+    for (const status of ["failed", "done", "not_started", ""]) {
+      expect(accepts("slack_post_plan", plan(status)), status).toBe(false);
+    }
+  });
+});
