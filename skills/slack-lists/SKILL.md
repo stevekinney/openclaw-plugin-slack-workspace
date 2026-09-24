@@ -11,6 +11,8 @@ then read its column and option IDs with `slack_list_schema` before writing to i
 `slack_list_item_create` and `slack_list_item_update` accept column names and option
 labels directly and resolve them for you. `slack_list_schema` is for seeing what
 columns and options exist.
+Read rows back with `slack_list_items_list` (pass `archived: true` for archived rows)
+or one row and its subtasks with `slack_list_item_info`.
 
 ## The schema is fixed once the list exists
 

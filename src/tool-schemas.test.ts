@@ -23,11 +23,13 @@ const READ_ONLY = [
   "slack_canvas_list",
   "slack_bookmark_list",
   "slack_list_schema",
+  "slack_list_items_list",
+  "slack_list_item_info",
 ];
 
 describe("outputSchema", () => {
-  it("is declared by all 38 tools", () => {
-    expect(tools).toHaveLength(38);
+  it("is declared by all 40 tools", () => {
+    expect(tools).toHaveLength(40);
     for (const tool of tools) expect(tool.outputSchema, tool.name).toBeDefined();
   });
 });

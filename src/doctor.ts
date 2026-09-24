@@ -65,6 +65,8 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind; scopes: string[] }>
   slack_list_item_update: { token: "bot", scopes: ["lists:read", "lists:write"] },
   slack_list_item_delete: { token: "bot", scopes: ["lists:write"] },
   slack_list_items_delete_multiple: { token: "bot", scopes: ["lists:write"] },
+  slack_list_items_list: { token: "bot", scopes: ["lists:read"] },
+  slack_list_item_info: { token: "bot", scopes: ["lists:read"] },
 };
 
 export type TokenAudit = {
