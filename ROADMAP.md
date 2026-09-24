@@ -739,7 +739,9 @@ channel plugin does *not* already own — see **Not doing**, below).
   - Tests: mocked POST, including an unconfigured-name error case.
   - Size: S
 
-- [ ] **W-03: Spike — workflows.templates:read/write** — Confirm the concrete Web API method(s) for creating/publishing a Workflow Builder template and their payload shape; research found only scope-reference pages, no confirmed method.
+- [x] **W-03: Spike — workflows.templates:read/write** — Confirm the concrete Web API method(s) for creating/publishing a Workflow Builder template and their payload shape; research found only scope-reference pages, no confirmed method.
+  - **Finding (2026-09-24): no Web API method consumes either scope, so no `slack_workflow_template_*` tool ships.** The scope reference pages on docs.slack.dev (`workflows.templates:read`, "Manage Slack workflow template on user's behalf", and `workflows.templates:write`, "Write Slack workflow template on user's behalf"; both list Bot and User tokens) list no methods that use them. The docs.slack.dev method index has no method containing "template". Its whole `workflows.*` family is `workflows.featured.add`/`list`/`remove`/`set`, which use `bookmarks:*` scopes (`workflows.featured.add` requires `bookmarks:write`) and act on link-trigger IDs, not templates, plus `workflows.triggers.permissions.*`. The `admin.workflows.*` family has no template methods either. The undocumented internals have none too: the Slack CLI's API client (`slackapi/slack-cli`, `internal/api/*.go`) defines `workflows.triggers.*`, `functions.workflows.steps.*`, `functions.distributions.permissions.*` and `apps.*`, and nothing template-shaped. `slackapi/deno-slack-api`, `@slack/web-api` and the fully generated `slack-edge/slack-web-api-client` have no template method. The scope strings show up only in scope enumerations (e.g. `slack-edge/slack-web-api-client`'s `src/manifest/scopes.ts`). Slack's help center describes Workflow Builder templates only as a gallery that end users pick from and customize in the UI. It mentions no app- or API-authored templates. The likely explanation is that the scopes are reserved for an internal or partner surface that isn't public. Recorded in **Scope hygiene** and **Not doing**.
+  - Live verification pending: none needed for the decision. There's no method name to call, so no live check against `lostgradient` can confirm or refute a payload shape. Revisit only if a `workflows.templates.*` method appears in the docs.slack.dev method index or changelog.
   - Why: this scope is granted on both bot *and* user tokens (unusual — most families here are bot-only), suggesting deliberate intent, and it directly answers the "Workflows" feature ask if a method exists.
   - Scope(s) & token type: `workflows.templates:write`, bot and/or user token (to confirm).
   - API methods: TBD — spike output.
@@ -1052,9 +1054,16 @@ gated through **O-02**. Findings:
   webhook-trigger URL needs no scope at all. Drop both at the next manifest
   review (fold into **O-11**) unless the app ever ships manifest-defined
   workflows.
-- **`workflows.templates:read`/`write`, `mcp:connect`** — see **W-03**,
-  **W-04**; each needs a spike to confirm a concrete Web API method exists
-  before being kept.
+- **`workflows.templates:read` / `workflows.templates:write` (W-03: no
+  method exists; flag for removal).** The docs.slack.dev scope pages list no
+  consuming methods. The method index has no template method (`workflows.*`
+  is only `featured.*`, which uses `bookmarks:*`, and
+  `triggers.permissions.*`). Neither the Slack CLI, the Deno/Node SDKs nor the
+  generated `slack-edge` client define one. Nothing in this plugin can
+  exercise them. Drop both at the next manifest review (fold into **O-11**)
+  unless Slack publishes a `workflows.templates.*` method.
+- **`mcp:connect`** — see **W-04**; needs a spike to confirm a concrete Web
+  API method exists before being kept.
 - **`usergroups:write`** is correctly **not** granted — keep it that way
   unless a write-capable usergroup feature is explicitly scoped and justified
   (see S-04, which ships read-only by design).
@@ -1141,6 +1150,10 @@ Recorded so a future pass through this backlog doesn't re-propose them:
   Mode. The methods are also undocumented outside the Deno SDK/Slack CLI.
   Starting a Workflow Builder workflow goes through **W-02**'s webhook-trigger
   URL instead.
+- **`slack_workflow_template_*` tools (W-03).** No public or internal Web API
+  method reads, creates or publishes Workflow Builder templates, despite the
+  `workflows.templates:*` scopes existing. Templates are a UI-only gallery
+  today. Revisit if Slack documents a `workflows.templates.*` method.
 - **A `slack_list_discovery` tool (L-07).** Slack has no documented method
   that enumerates Lists in a workspace or channel. Callers must already know a
   `list_id` (from `slack_list_create` or a shared link); `search.files` may
