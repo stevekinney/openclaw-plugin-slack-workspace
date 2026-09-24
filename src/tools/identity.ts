@@ -15,6 +15,17 @@ export const identityTools = (tool: ToolFactory) => [
         }),
       ),
     }),
+    outputSchema: Type.Object(
+      {
+        tokenKind: Type.Union([Type.Literal("bot"), Type.Literal("user")]),
+        team: Type.Union([Type.String(), Type.Null()]),
+        identity: Type.Union([Type.String(), Type.Null()]),
+        userId: Type.Union([Type.String(), Type.Null()]),
+        scopeCount: Type.Integer(),
+        scopes: Type.Array(Type.String()),
+      },
+      { additionalProperties: false },
+    ),
     async execute({ tokenKind }, config, context) {
       context.signal?.throwIfAborted();
       const kind = tokenKind ?? "bot";

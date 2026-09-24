@@ -101,5 +101,119 @@
       "slack_bookmark_add",
       "slack_bookmark_remove"
     ]
+  },
+  "toolMetadata": {
+    "slack_identity": {
+      "sideEffecting": false,
+      "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_search": {
+      "sideEffecting": false,
+      "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_schedule_message": {
+      "sideEffecting": true,
+      "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_scheduled_list": {
+      "sideEffecting": false,
+      "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_scheduled_cancel": {
+      "sideEffecting": true,
+      "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_post_table": {
+      "sideEffecting": true,
+      "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_post_plan": {
+      "sideEffecting": true,
+      "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_post_chart": {
+      "sideEffecting": true,
+      "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_blocks_send": {
+      "sideEffecting": true,
+      "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_blocks_update": {
+      "sideEffecting": true,
+      "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_canvas_create": {
+      "sideEffecting": true,
+      "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_canvas_edit": {
+      "sideEffecting": true,
+      "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_canvas_sections": {
+      "sideEffecting": false,
+      "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_bookmark_list": {
+      "sideEffecting": false,
+      "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_bookmark_add": {
+      "sideEffecting": true,
+      "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_bookmark_remove": {
+      "sideEffecting": true,
+      "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    }
   }
 }

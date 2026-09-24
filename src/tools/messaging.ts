@@ -65,7 +65,7 @@ export const messagingTools = (tool: ToolFactory) => [
           "Data rows, excluding the header. Every row must have exactly as many cells as `columns`. Numbers sort numerically; strings sort alphabetically.",
       }),
       pageSize: Type.Optional(
-        Type.Number({ minimum: 1, maximum: 100, description: "Rows per page. Default 5." }),
+        Type.Integer({ minimum: 1, maximum: 100, description: "Rows per page. Default 5." }),
       ),
     }),
     outputSchema: postResultSchema,
@@ -169,7 +169,7 @@ export const messagingTools = (tool: ToolFactory) => [
       "Post a native Slack chart (pie, bar, line, or area). Use instead of describing numbers in prose or generating a chart image. Max 2 charts per message.",
     parameters: Type.Object({
       ...targetParams,
-      title: Type.String({ description: "Chart title. Max 50 characters." }),
+      title: Type.String({ maxLength: 50, description: "Chart title. Max 50 characters." }),
       chartType: Type.Union(
         [
           Type.Literal("pie"),
@@ -182,14 +182,14 @@ export const messagingTools = (tool: ToolFactory) => [
       segments: Type.Optional(
         Type.Array(
           Type.Object({
-            label: Type.String({ description: "Slice label. Max 20 characters." }),
+            label: Type.String({ maxLength: 20, description: "Slice label. Max 20 characters." }),
             value: Type.Number(),
           }),
           { minItems: 1, maxItems: 12, description: "Pie slices. Required when chartType is pie." },
         ),
       ),
       categories: Type.Optional(
-        Type.Array(Type.String(), {
+        Type.Array(Type.String({ maxLength: 20 }), {
           minItems: 1,
           maxItems: 20,
           description:
@@ -199,7 +199,7 @@ export const messagingTools = (tool: ToolFactory) => [
       series: Type.Optional(
         Type.Array(
           Type.Object({
-            name: Type.String({ description: "Legend name. Max 20 characters, unique." }),
+            name: Type.String({ maxLength: 20, description: "Legend name. Max 20 characters, unique." }),
             values: Type.Array(Type.Number(), {
               description: "One value per entry in `categories`, same order.",
             }),
@@ -222,6 +222,15 @@ export const messagingTools = (tool: ToolFactory) => [
       } else {
         if (!categories?.length || !series?.length) {
           throw new Error(`A ${chartType} chart requires both \`categories\` and \`series\`.`);
+        }
+        // JSON Schema cannot require unique object properties, so check names here.
+        const duplicate = series.find(
+          (entry, index) => series.findIndex((other) => other.name === entry.name) !== index,
+        );
+        if (duplicate) {
+          throw new Error(
+            `Series name "${duplicate.name}" appears more than once. Slack requires unique names.`,
+          );
         }
         const mismatch = series.find((entry) => entry.values.length !== categories.length);
         if (mismatch) {

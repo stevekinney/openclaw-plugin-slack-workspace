@@ -19,9 +19,9 @@ export const searchTools = (tool: ToolFactory) => [
         }),
       ),
       count: Type.Optional(
-        Type.Number({ minimum: 1, maximum: 100, description: "Results per page. Default 20." }),
+        Type.Integer({ minimum: 1, maximum: 100, description: "Results per page. Default 20." }),
       ),
-      page: Type.Optional(Type.Number({ minimum: 1, description: "Page number. Default 1." })),
+      page: Type.Optional(Type.Integer({ minimum: 1, description: "Page number. Default 1." })),
       sort: Type.Optional(
         Type.Union([Type.Literal("score"), Type.Literal("timestamp")], {
           description: "Rank by relevance (score) or recency (timestamp). Default: score.",
@@ -33,6 +33,19 @@ export const searchTools = (tool: ToolFactory) => [
         }),
       ),
     }),
+    outputSchema: Type.Object(
+      {
+        query: Type.String(),
+        scope: Type.Union([Type.Literal("messages"), Type.Literal("files")]),
+        total: Type.Number(),
+        paging: Type.Unknown({ description: "Slack's paging object, or null." }),
+        matches: Type.Array(Type.Record(Type.String(), Type.Unknown()), {
+          description:
+            "Message hits: ts, text, user, username, channel, permalink. File hits: id, name, title, filetype, user, created, permalink.",
+        }),
+      },
+      { additionalProperties: false },
+    ),
     async execute({ query, scope, count, page, sort, sortDir }, config, context) {
       context.signal?.throwIfAborted();
       const searchFiles = scope === "files";

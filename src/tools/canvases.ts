@@ -136,6 +136,10 @@ export const canvasTools = (tool: ToolFactory) => [
         Type.String({ description: "Only return sections containing this text." }),
       ),
     }),
+    outputSchema: Type.Object(
+      { sections: Type.Array(Type.Object({ id: Type.String() })) },
+      { additionalProperties: false },
+    ),
     async execute({ canvasId, containsText }, config, context) {
       context.signal?.throwIfAborted();
       const token = resolveToken(config);
