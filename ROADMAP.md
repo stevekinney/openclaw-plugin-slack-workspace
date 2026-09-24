@@ -715,7 +715,9 @@ channel plugin does *not* already own — see **Not doing**, below).
 
 ## Tier 3 — Workflows & triggers
 
-- [ ] **W-01: Spike — workflows.triggers.create/update/delete** — Confirm the exact Web API method(s) for creating a runtime trigger from a bot token, and whether it can target a Workflow-Builder-authored workflow this app doesn't itself own. Research found only `workflows.triggers.permissions.*` (who may use an existing trigger) confirmed as callable; trigger *creation* prose exists but no confirmed plain Web API method was found outside the Slack CLI/Deno Functions platform.
+- [x] **W-01: Spike — workflows.triggers.create/update/delete** — Confirm the exact Web API method(s) for creating a runtime trigger from a bot token, and whether it can target a Workflow-Builder-authored workflow this app doesn't itself own. Research found only `workflows.triggers.permissions.*` (who may use an existing trigger) confirmed as callable; trigger *creation* prose exists but no confirmed plain Web API method was found outside the Slack CLI/Deno Functions platform.
+  - **Finding (2026-09-24): the methods exist but are undocumented automation-platform internals, and they can only target workflows defined in an app's own manifest — so no `slack_trigger_*` tools ship.** The family is `workflows.triggers.create`, `.update`, `.delete`, `.list` and `.info` (plus the documented `workflows.triggers.permissions.add`/`.list`/`.remove`/`.set`). Sources: the method constants and request structs in the Slack CLI (`slackapi/slack-cli`, `internal/api/workflows.go`) and the typed client in `slackapi/deno-slack-api` (`src/typed-method-types/workflows/triggers/mod.ts`). Both send a JSON `POST` to `https://slack.com/api/<method>`, so a plain `fetch` could reach them. But: (1) only the `permissions.*` methods have reference pages on docs.slack.dev, and those pages say they're "for apps created with the Deno Slack SDK." `create`/`update`/`delete` have no reference page at all, which means no documented scope, token type or rate-limit tier. The Deno SDK guides require `triggers:write` in the app manifest for runtime trigger creation. `@slack/web-api` (node) has none of these methods. (2) A trigger's target is `workflow: "#/workflows/<callback_id>"` together with `workflow_app_id` (the CLI sets it to the app being deployed, and the API returns `invalid_workflow_app_id` if it's missing or wrong). That resolves to a workflow declared in *that app's* manifest. Neither the CLI, the SDK types nor the docs offer any way to name a Workflow Builder–authored workflow, which belongs to Workflow Builder, not to this app. (3) This app's manifest declares no `workflows`/`functions`. Adding them would mean Socket Mode function execution, which the bundled channel plugin owns (the same gate as the **Not doing** entry for modern custom Workflow Steps). (4) The Slack CLI creates triggers with the developer's CLI auth token, not a bot token; the Deno SDK creates them from inside a running function. Whether a plain `xoxb` bot token with `triggers:write` is accepted by `workflows.triggers.create` at all is UNVERIFIED and needs a live check. It's moot either way, because there's no workflow of ours to point it at. The workable path for "start a Workflow Builder workflow conversationally" is **W-02**: a webhook trigger created once in Workflow Builder, then POSTed to. Recorded in **Scope hygiene** and **Not doing**.
+  - Live verification pending: a single `workflows.triggers.list` call with the bot token against `lostgradient`, to see whether bot tokens are accepted at all (`not_allowed_token_type` vs `ok`). Informational only; it doesn't change the decision above.
   - Why: `triggers:read`/`triggers:write` are granted and completely unused; this determines whether building `slack_trigger_create`/`list`/`delete` is even possible from this plugin's plain-fetch architecture.
   - Scope(s) & token type: `triggers:write`, bot token.
   - API methods: `workflows.triggers.*` (to confirm).
@@ -1038,9 +1040,19 @@ gated through **O-02**. Findings:
 - **`links:read` / `links:write` / `links.embed:write`** — see **S-06**;
   decision pending, architecturally gated on `link_shared` event subscription
   (a channel-plugin change) plus **O-01**.
-- **`triggers:read` / `triggers:write`, `workflows.templates:read`/`write`,
-  `mcp:connect`** — see **W-01**, **W-03**, **W-04**; each needs a spike to
-  confirm a concrete Web API method exists before being kept.
+- **`triggers:read` / `triggers:write` (W-01: no usable path; flag for
+  removal).** `workflows.triggers.create/update/delete/list/info` exist, but
+  they're undocumented internals of the Deno/CLI automation platform and can
+  only target workflows declared in the calling app's own manifest
+  (`#/workflows/<callback_id>` + `workflow_app_id`). This app declares none
+  and can't host any without Socket Mode function handling, which the channel
+  plugin owns. They can't target Workflow Builder–authored workflows. W-02's
+  webhook-trigger URL needs no scope at all. Drop both at the next manifest
+  review (fold into **O-11**) unless the app ever ships manifest-defined
+  workflows.
+- **`workflows.templates:read`/`write`, `mcp:connect`** — see **W-03**,
+  **W-04**; each needs a spike to confirm a concrete Web API method exists
+  before being kept.
 - **`usergroups:write`** is correctly **not** granted — keep it that way
   unless a write-capable usergroup feature is explicitly scoped and justified
   (see S-04, which ships read-only by design).
@@ -1120,6 +1132,13 @@ Recorded so a future pass through this backlog doesn't re-propose them:
   this plugin and (b) the **O-01** entry migration, and even then the modal
   would be opened by a plugin interactive handler reacting to a button
   click, not by an agent tool call. No build task is scheduled.
+- **`slack_trigger_create`/`list`/`delete` tools (W-01).**
+  `workflows.triggers.*` only target workflows defined in the calling app's
+  own manifest, never Workflow Builder–authored ones. This app has no
+  manifest workflows and can't host them while the channel plugin owns Socket
+  Mode. The methods are also undocumented outside the Deno SDK/Slack CLI.
+  Starting a Workflow Builder workflow goes through **W-02**'s webhook-trigger
+  URL instead.
 - **A `slack_list_discovery` tool (L-07).** Slack has no documented method
   that enumerates Lists in a workspace or channel. Callers must already know a
   `list_id` (from `slack_list_create` or a shared link); `search.files` may
