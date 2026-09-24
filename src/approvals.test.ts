@@ -36,6 +36,11 @@ const gated: Array<[string, Record<string, unknown>, string]> = [
     "canvases.edit",
   ],
   [
+    "slack_canvas_edit",
+    { canvasId: "F0TEST", operation: "delete", sectionId: "temp:C:abc" },
+    "canvases.edit",
+  ],
+  [
     "slack_bookmark_remove",
     { channelId: "C0TEST", bookmarkId: "Bk0TEST" },
     "bookmarks.remove",
@@ -94,6 +99,20 @@ describe("approval registry", () => {
       })?.description,
     ).toContain("temp:C:abc");
     expect(
+      approvalFor("slack_canvas_edit", {
+        canvasId: "F0TEST",
+        operation: "delete",
+        sectionId: "temp:C:abc",
+      }),
+    ).toMatchObject({ scope: { target: "canvas F0TEST" } });
+    expect(
+      approvalFor("slack_canvas_edit", {
+        canvasId: "F0TEST",
+        operation: "delete",
+        sectionId: "temp:C:abc",
+      })?.description,
+    ).toContain("temp:C:abc");
+    expect(
       approvalFor("slack_bookmark_remove", { channelId: "C0TEST", bookmarkId: "Bk0TEST" }),
     ).toMatchObject({ scope: { target: "channel C0TEST" } });
     expect(
@@ -106,7 +125,7 @@ describe("approval registry", () => {
     ).toContain("Q0TEST");
   });
 
-  it.each(["append", "prepend", "rename"])("does not gate canvas %s", (operation) => {
+  it.each(["append", "prepend", "insert_after", "insert_before", "rename"])("does not gate canvas %s", (operation) => {
     expect(
       approvalFor("slack_canvas_edit", { canvasId: "F0TEST", operation, markdown: "x", title: "t" }),
     ).toBeUndefined();

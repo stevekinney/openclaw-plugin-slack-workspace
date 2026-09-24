@@ -107,7 +107,7 @@ export const canvasTools = (tool: ToolFactory) => [
     name: "slack_canvas_edit",
     label: "Edit Slack canvas",
     description:
-      "Edit a Slack canvas: append markdown, prepend it, replace the whole body, or rename the canvas.",
+      "Edit a Slack canvas: append markdown, prepend it, replace the whole body or one section, insert markdown before or after a section, delete a section, or rename the canvas. Get section IDs from slack_canvas_sections.",
     parameters: Type.Object({
       canvasId: Type.String({ description: "Canvas ID, e.g. F0166DCSTS7." }),
       operation: Type.Union(
@@ -115,16 +115,24 @@ export const canvasTools = (tool: ToolFactory) => [
           Type.Literal("append"),
           Type.Literal("prepend"),
           Type.Literal("replace"),
+          Type.Literal("insert_after"),
+          Type.Literal("insert_before"),
+          Type.Literal("delete"),
           Type.Literal("rename"),
         ],
         { description: "Edit to perform." },
       ),
       markdown: Type.Optional(
-        Type.String({ description: "Markdown content for append, prepend, or replace." }),
+        Type.String({
+          description: "Markdown content for append, prepend, replace, insert_after, or insert_before.",
+        }),
       ),
       title: Type.Optional(Type.String({ description: "New title when operation is rename." })),
       sectionId: Type.Optional(
-        Type.String({ description: "Section ID to target when replacing one section." }),
+        Type.String({
+          description:
+            "Section ID from slack_canvas_sections. Required for insert_after, insert_before, and delete; optional for replace (omit to replace the whole body).",
+        }),
       ),
     }),
     outputSchema: Type.Object(
@@ -150,18 +158,27 @@ export const canvasTools = (tool: ToolFactory) => [
         return { canvasId, operation, url: await canvasUrl(token, canvasId, context) };
       }
 
-      if (!markdown) throw new Error(`${operation} requires markdown.`);
-      const slackOperation =
-        operation === "append"
-          ? "insert_at_end"
-          : operation === "prepend"
-            ? "insert_at_start"
-            : "replace";
-      const change: Record<string, unknown> = {
-        operation: slackOperation,
-        document_content: { type: "markdown", markdown },
-      };
-      if (slackOperation === "replace" && sectionId) change.section_id = sectionId;
+      const needsSection =
+        operation === "insert_after" || operation === "insert_before" || operation === "delete";
+      if (needsSection && !sectionId) throw new Error(`${operation} requires sectionId.`);
+
+      let change: Record<string, unknown>;
+      if (operation === "delete") {
+        change = { operation: "delete", section_id: sectionId };
+      } else {
+        if (!markdown) throw new Error(`${operation} requires markdown.`);
+        const slackOperation =
+          operation === "append"
+            ? "insert_at_end"
+            : operation === "prepend"
+              ? "insert_at_start"
+              : operation;
+        change = { operation: slackOperation, document_content: { type: "markdown", markdown } };
+        // append/prepend target the whole canvas; every other operation can anchor on a section.
+        if (sectionId && operation !== "append" && operation !== "prepend") {
+          change.section_id = sectionId;
+        }
+      }
 
       await callSlack(
         "canvases.edit",
@@ -210,11 +227,18 @@ export const canvasTools = (tool: ToolFactory) => [
   }),
 ];
 
-/** `replace` overwrites existing canvas content; Slack offers no API to restore it. */
+/** `replace` overwrites and `delete` removes canvas content; Slack offers no API to restore it. */
 export const canvasApprovals: ApprovalRule[] = [
   {
     toolName: "slack_canvas_edit",
     check: ({ canvasId, operation, sectionId }) => {
+      if (operation === "delete") {
+        return {
+          title: "Delete Slack canvas section",
+          description: `Delete section ${sectionId} of canvas ${canvasId}. The deleted content cannot be restored.`,
+          target: `canvas ${canvasId}`,
+        };
+      }
       if (operation !== "replace") return undefined;
       return {
         title: "Replace Slack canvas content",
