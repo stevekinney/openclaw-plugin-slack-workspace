@@ -2,6 +2,8 @@ import { Type } from "typebox";
 import { callSlack, resolveToken, type SlackCallContext } from "../client.js";
 import type { ApprovalRule } from "../approvals.js";
 import { channelIdParam, type ToolFactory } from "../schemas.js";
+import { addBookmark, slackBookmark } from "./bookmarks.js";
+import { createCanvas, createdCanvasSchema } from "./canvases.js";
 
 /**
  * The app holds only the public-channel scopes (`channels:manage`,
@@ -82,6 +84,18 @@ const confirmParam = (action: string) =>
   Type.Literal(true, {
     description: `Must be exactly true to ${action}. There is no default: omitting it rejects the call before Slack is contacted.`,
   });
+
+const userIdsParam = (description: string) =>
+  Type.Array(Type.String({ description: "User ID, e.g. U0123ABCD." }), {
+    minItems: 1,
+    maxItems: 100,
+    description,
+  });
+
+type KickoffStepName = "create" | "topic" | "purpose" | "invite" | "canvas" | "bookmark";
+type KickoffStep = { step: KickoffStepName; ok: boolean; error?: string };
+
+const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 export const channelTools = (tool: ToolFactory) => [
   tool({
@@ -217,11 +231,7 @@ export const channelTools = (tool: ToolFactory) => [
       "Invite users to a public Slack channel. Private channels are refused (they need `groups:write.invites`).",
     parameters: Type.Object({
       channelId: publicChannelIdParam(),
-      userIds: Type.Array(Type.String({ description: "User ID, e.g. U0123ABCD." }), {
-        minItems: 1,
-        maxItems: 100,
-        description: "Users to invite; at most 100 per call.",
-      }),
+      userIds: userIdsParam("Users to invite; at most 100 per call."),
     }),
     outputSchema: Type.Object(
       { channel: slackChannel, invited: Type.Array(Type.String()) },
@@ -240,6 +250,157 @@ export const channelTools = (tool: ToolFactory) => [
         ),
       );
       return { channel: curateChannel(data.channel, channelId), invited: userIds };
+    },
+  }),
+  tool({
+    name: "slack_channel_kickoff",
+    label: "Kick off Slack channel",
+    description:
+      "Stand up a project room in one call: create a public channel, then optionally set its topic and purpose, invite users, create a canvas shared to it, and add a link bookmark. Treat this as requiring confirmation before use: it always waits for a human's approval. Steps after create run even if an earlier one fails; each is reported in `steps` with its error, and `complete` is false if any failed. If create itself fails, the call throws and nothing else runs.",
+    parameters: Type.Object({
+      name: channelNameParam(
+        "Channel name: lowercase letters, numbers, hyphens, and underscores; at most 80 characters.",
+      ),
+      topic: Type.Optional(
+        Type.String({ maxLength: 250, description: "Channel topic; at most 250 characters." }),
+      ),
+      purpose: Type.Optional(
+        Type.String({ maxLength: 250, description: "Channel purpose; at most 250 characters." }),
+      ),
+      invite: Type.Optional(userIdsParam("Users to invite; at most 100.")),
+      canvas: Type.Optional(
+        Type.Object(
+          {
+            title: Type.String({ description: "Canvas title." }),
+            markdown: Type.String({ description: "Canvas body as markdown." }),
+            accessLevel: Type.Optional(
+              Type.Union([Type.Literal("read"), Type.Literal("write")], {
+                description: "The channel's access to the canvas. Default: write.",
+              }),
+            ),
+          },
+          { description: "Create a canvas and share it with the new channel." },
+        ),
+      ),
+      bookmark: Type.Optional(
+        Type.Object(
+          {
+            title: Type.String({ description: "Bookmark title." }),
+            link: Type.String({ description: "Bookmark URL." }),
+            emoji: Type.Optional(Type.String({ description: "Emoji shortcode, e.g. :books:." })),
+          },
+          { description: "Add a link bookmark to the new channel." },
+        ),
+      ),
+    }),
+    outputSchema: Type.Object(
+      {
+        channel: slackChannel,
+        complete: Type.Boolean({ description: "True when every requested step succeeded." }),
+        steps: Type.Array(
+          Type.Object(
+            {
+              step: Type.Union([
+                Type.Literal("create"),
+                Type.Literal("topic"),
+                Type.Literal("purpose"),
+                Type.Literal("invite"),
+                Type.Literal("canvas"),
+                Type.Literal("bookmark"),
+              ]),
+              ok: Type.Boolean(),
+              error: Type.Optional(Type.String()),
+            },
+            { additionalProperties: false },
+          ),
+          { description: "Each requested step, in the order it ran." },
+        ),
+        invited: Type.Array(Type.String()),
+        canvas: Type.Union([createdCanvasSchema, Type.Null()], {
+          description: "Set whenever the canvas was created, even if sharing it failed.",
+        }),
+        bookmark: Type.Union([slackBookmark, Type.Null()]),
+      },
+      { additionalProperties: false },
+    ),
+    async execute({ name, topic, purpose, invite, canvas, bookmark }, config, context) {
+      context.signal?.throwIfAborted();
+      const token = resolveToken(config);
+      // Nothing exists yet, so a failed create is an ordinary throw.
+      const created = await callSlack(
+        "conversations.create",
+        token,
+        { name, is_private: false },
+        context,
+      );
+      const channel = curateChannel(created.channel);
+      const steps: KickoffStep[] = [{ step: "create", ok: true }];
+
+      /** Run one step, recording a failure instead of throwing so later steps still run. */
+      const run = async (step: KickoffStepName, action: () => Promise<string | void>) => {
+        context.signal?.throwIfAborted();
+        try {
+          const error = await action();
+          steps.push(error === undefined ? { step, ok: true } : { step, ok: false, error });
+          return error === undefined;
+        } catch (error) {
+          // Cancellation isn't a step failure: honor it rather than returning a result.
+          context.signal?.throwIfAborted();
+          steps.push({ step, ok: false, error: errorMessage(error) });
+          return false;
+        }
+      };
+
+      // The channel was just created public, so the private-channel checks are skipped.
+      if (topic !== undefined) {
+        await run("topic", async () => {
+          await callSlack("conversations.setTopic", token, { channel: channel.id, topic }, context);
+        });
+      }
+      if (purpose !== undefined) {
+        await run("purpose", async () => {
+          await callSlack(
+            "conversations.setPurpose",
+            token,
+            { channel: channel.id, purpose },
+            context,
+          );
+        });
+      }
+      let invited: string[] = [];
+      if (invite?.length) {
+        const ok = await run("invite", async () => {
+          await callSlack(
+            "conversations.invite",
+            token,
+            { channel: channel.id, users: invite.join(",") },
+            context,
+          );
+        });
+        if (ok) invited = invite;
+      }
+      let canvasResult: Awaited<ReturnType<typeof createCanvas>> | null = null;
+      if (canvas) {
+        await run("canvas", async () => {
+          canvasResult = await createCanvas(token, { ...canvas, channelId: channel.id }, context);
+          return canvasResult.shareError;
+        });
+      }
+      let bookmarkResult: Awaited<ReturnType<typeof addBookmark>> = null;
+      if (bookmark) {
+        await run("bookmark", async () => {
+          bookmarkResult = await addBookmark(token, { ...bookmark, channelId: channel.id }, context);
+        });
+      }
+
+      return {
+        channel,
+        complete: steps.every((step) => step.ok),
+        steps,
+        invited,
+        canvas: canvasResult,
+        bookmark: bookmarkResult,
+      };
     },
   }),
 ];
@@ -264,5 +425,23 @@ export const channelApprovals: ApprovalRule[] = [
       description: `Rename channel ${channelId} to #${name}. Links and references to the old name stop matching.`,
       target: `channel ${channelId}`,
     }),
+  },
+  {
+    // Several visible, hard-to-undo writes in one call (a new channel, invitations that
+    // notify people, a shared canvas), so every kickoff waits for a human.
+    toolName: "slack_channel_kickoff",
+    check: ({ name, topic, purpose, invite, canvas, bookmark }) => {
+      const plan = [`Create public channel #${name}`];
+      if (topic !== undefined) plan.push(`set its topic to "${topic}"`);
+      if (purpose !== undefined) plan.push(`set its purpose to "${purpose}"`);
+      if (Array.isArray(invite) && invite.length) plan.push(`invite ${invite.join(", ")}`);
+      if (canvas) plan.push(`create and share canvas "${(canvas as { title?: unknown }).title}"`);
+      if (bookmark) plan.push(`bookmark "${(bookmark as { title?: unknown }).title}"`);
+      return {
+        title: "Kick off Slack channel",
+        description: `${plan.join(", ")}.`,
+        target: `new channel #${name}`,
+      };
+    },
   },
 ];

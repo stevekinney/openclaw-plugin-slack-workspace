@@ -1,7 +1,7 @@
 {
   "id": "slack-workspace",
   "name": "Slack Workspace",
-  "description": "Slack workspace tools: identity and message scheduling, search, structured messaging (tables, plans, charts), raw Block Kit messages, canvases, channel bookmarks, and public-channel lifecycle (create, archive, rename, topic, purpose, invite).",
+  "description": "Slack workspace tools: identity and message scheduling, search, structured messaging (tables, plans, charts), raw Block Kit messages, canvases, channel bookmarks, and public-channel lifecycle (create, archive, rename, topic, purpose, invite, one-call kickoff).",
   "version": "0.1.0",
   "configSchema": {
     "type": "object",
@@ -113,7 +113,8 @@
       "slack_channel_rename",
       "slack_channel_set_topic",
       "slack_channel_set_purpose",
-      "slack_channel_invite"
+      "slack_channel_invite",
+      "slack_channel_kickoff"
     ]
   },
   "toolMetadata": {
@@ -265,6 +266,13 @@
       ]
     },
     "slack_channel_invite": {
+      "sideEffecting": true,
+      "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_channel_kickoff": {
       "sideEffecting": true,
       "replaySafe": false,
       "profiles": [
