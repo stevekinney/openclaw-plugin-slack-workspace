@@ -26,6 +26,7 @@ describe("slack-workspace", () => {
       "slack_canvas_create",
       "slack_canvas_edit",
       "slack_canvas_sections",
+      "slack_canvas_delete",
       "slack_bookmark_list",
       "slack_bookmark_add",
       "slack_bookmark_remove",

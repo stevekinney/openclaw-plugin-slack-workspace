@@ -116,6 +116,7 @@
       "slack_canvas_create",
       "slack_canvas_edit",
       "slack_canvas_sections",
+      "slack_canvas_delete",
       "slack_bookmark_list",
       "slack_bookmark_add",
       "slack_bookmark_remove",
@@ -218,6 +219,13 @@
     "slack_canvas_sections": {
       "sideEffecting": false,
       "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_canvas_delete": {
+      "sideEffecting": true,
+      "replaySafe": false,
       "profiles": [
         "messaging"
       ]

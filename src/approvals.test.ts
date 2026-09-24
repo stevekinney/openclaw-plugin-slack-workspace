@@ -40,6 +40,7 @@ const gated: Array<[string, Record<string, unknown>, string]> = [
     { canvasId: "F0TEST", operation: "delete", sectionId: "temp:C:abc" },
     "canvases.edit",
   ],
+  ["slack_canvas_delete", { canvasId: "F0TEST" }, "canvases.delete"],
   [
     "slack_bookmark_remove",
     { channelId: "C0TEST", bookmarkId: "Bk0TEST" },
@@ -63,6 +64,7 @@ describe("approval registry", () => {
   it("covers the destructive tools", () => {
     expect(APPROVAL_RULES.map((rule) => rule.toolName).sort()).toEqual([
       "slack_bookmark_remove",
+      "slack_canvas_delete",
       "slack_canvas_edit",
       "slack_channel_archive",
       "slack_channel_kickoff",
