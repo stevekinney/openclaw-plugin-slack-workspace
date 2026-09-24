@@ -24,7 +24,7 @@ describe("channelIdParam", () => {
     const withChannelId = tools.filter(
       (tool) => (tool.parameters as JsonSchema).properties?.channelId,
     );
-    expect(withChannelId.length).toBe(19);
+    expect(withChannelId.length).toBe(20);
     for (const tool of withChannelId) {
       const channelId = (tool.parameters as JsonSchema).properties!.channelId;
       expect(channelId.type, tool.name).toBe("string");

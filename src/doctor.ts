@@ -27,6 +27,8 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind; scopes: string[] }>
   slack_canvas_access_delete: { token: "bot", scopes: ["canvases:write"] },
   slack_canvas_delete: { token: "bot", scopes: ["canvases:write"] },
   slack_canvas_channel_get_or_create: { token: "bot", scopes: ["channels:read", "canvases:write"] },
+  // groups:/im:/mpim:history stand in for channels:history on private channels and DMs.
+  slack_canvas_from_thread: { token: "bot", scopes: ["channels:history", "canvases:write"] },
   slack_bookmark_list: { token: "bot", scopes: ["bookmarks:read"] },
   slack_bookmark_add: { token: "bot", scopes: ["bookmarks:write"] },
   slack_bookmark_remove: { token: "bot", scopes: ["bookmarks:write"] },
