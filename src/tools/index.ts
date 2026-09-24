@@ -3,6 +3,7 @@ import { bookmarkTools } from "./bookmarks.js";
 import { canvasTools } from "./canvases.js";
 import { channelTools } from "./channels.js";
 import { identityTools } from "./identity.js";
+import { listTools } from "./lists.js";
 import { messagingTools } from "./messaging.js";
 import { schedulingTools } from "./scheduling.js";
 import { searchTools } from "./search.js";
@@ -16,4 +17,5 @@ export const tools = [
   ...canvasTools(defineTool),
   ...bookmarkTools(defineTool),
   ...channelTools(defineTool),
+  ...listTools(defineTool),
 ];

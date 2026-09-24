@@ -45,6 +45,7 @@ describe("slack-workspace", () => {
       "slack_channel_join",
       "slack_channel_leave",
       "slack_channel_kickoff",
+      "slack_list_create",
     ]);
   });
 

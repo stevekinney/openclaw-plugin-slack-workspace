@@ -51,4 +51,5 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
   slack_channel_join: idempotentWrite,
   slack_channel_leave: idempotentWrite,
   slack_channel_kickoff: write,
+  slack_list_create: write,
 };
