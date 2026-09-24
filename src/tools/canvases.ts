@@ -7,7 +7,7 @@ import {
   type SlackCallContext,
 } from "../client.js";
 import type { ApprovalRule } from "../approvals.js";
-import { channelIdParam, type ToolFactory } from "../schemas.js";
+import { CHANNEL_ID_DESCRIPTION, type ToolFactory } from "../schemas.js";
 
 /** Null when the workspace can't be looked up: better no link than one that 404s. */
 async function canvasUrl(token: string, canvasId: string, context: SlackCallContext) {
@@ -27,19 +27,80 @@ const SECTION_TYPES = [
   "blockquote",
 ] as const;
 
+/** Who a canvas access change applies to. Slack takes channels or users per call, never both. */
+type CanvasAccessTarget = { channelIds: string[] } | { userIds: string[] };
+
+type CanvasAccessLevel = "read" | "write" | "owner";
+
+const canvasIdsParam = (kind: "Channel" | "User", example: string, note: string) =>
+  Type.Optional(
+    Type.Array(Type.String({ description: `${kind} ID, e.g. ${example}.` }), {
+      minItems: 1,
+      uniqueItems: true,
+      description: `${note} Set channelIds or userIds, not both.`,
+    }),
+  );
+
+const canvasTargetParams = (verb: string) => ({
+  channelIds: canvasIdsParam("Channel", "C0C42LZQZGQ", `Channels to ${verb}.`),
+  userIds: canvasIdsParam("User", "U0123ABCD", `Users to ${verb}.`),
+});
+
+const canvasTargetOutput = {
+  channelIds: Type.Optional(Type.Array(Type.String())),
+  userIds: Type.Optional(Type.Array(Type.String())),
+};
+
+/** Fail before calling Slack unless exactly one of channelIds/userIds is non-empty. */
+function canvasAccessTarget(channelIds?: string[], userIds?: string[]): CanvasAccessTarget {
+  const hasChannels = Boolean(channelIds?.length);
+  const hasUsers = Boolean(userIds?.length);
+  if (hasChannels && hasUsers) throw new Error("Set either channelIds or userIds, not both.");
+  if (hasChannels) return { channelIds: channelIds! };
+  if (hasUsers) return { userIds: userIds! };
+  throw new Error("Set channelIds or userIds.");
+}
+
+/** Slack's field names for a target: `channel_ids` or `user_ids`. */
+const slackTarget = (target: CanvasAccessTarget) =>
+  "channelIds" in target ? { channel_ids: target.channelIds } : { user_ids: target.userIds };
+
+/**
+ * Grant `accessLevel` on a canvas to channels or users via `canvases.access.set`.
+ * Shared by `slack_canvas_access_set` and `createCanvas`.
+ */
+async function setCanvasAccess(
+  token: string,
+  canvasId: string,
+  target: CanvasAccessTarget,
+  accessLevel: CanvasAccessLevel,
+  context: SlackCallContext,
+) {
+  // A channel can read or write a canvas but can't own it.
+  if (accessLevel === "owner" && "channelIds" in target) {
+    throw new Error("owner access can only be granted to users, not channels.");
+  }
+  await callSlack(
+    "canvases.access.set",
+    token,
+    { canvas_id: canvasId, ...slackTarget(target), access_level: accessLevel },
+    context,
+  );
+}
+
 /** What `createCanvas` returns. */
 export const createdCanvasSchema = Type.Object(
   {
     canvasId: Type.String(),
     url: Type.Union([Type.String(), Type.Null()]),
-    sharedWith: Type.Union([Type.String(), Type.Null()]),
+    sharedWith: Type.Union([Type.Array(Type.String()), Type.Null()]),
     shareError: Type.Optional(Type.String()),
   },
   { additionalProperties: false },
 );
 
 /**
- * Create a canvas and optionally share it to a channel. The canvas exists once create
+ * Create a canvas and optionally share it to channels. The canvas exists once create
  * succeeds, so a share failure is reported, not thrown: the caller still needs the ID
  * to retry sharing or clean it up. Shared by `slack_canvas_create` and `slack_channel_kickoff`.
  */
@@ -48,9 +109,9 @@ export async function createCanvas(
   {
     title,
     markdown,
-    channelId,
+    channelIds,
     accessLevel,
-  }: { title: string; markdown: string; channelId?: string; accessLevel?: "read" | "write" },
+  }: { title: string; markdown: string; channelIds?: string[]; accessLevel?: "read" | "write" },
   context: SlackCallContext,
 ) {
   const created = await callSlack(
@@ -63,19 +124,11 @@ export async function createCanvas(
     context,
   );
   const canvasId = String(created.canvas_id ?? "");
+  const shareTo = channelIds?.length ? channelIds : undefined;
   let shareError: string | undefined;
-  if (channelId) {
+  if (shareTo) {
     try {
-      await callSlack(
-        "canvases.access.set",
-        token,
-        {
-          canvas_id: canvasId,
-          channel_ids: [channelId],
-          access_level: accessLevel ?? "write",
-        },
-        context,
-      );
+      await setCanvasAccess(token, canvasId, { channelIds: shareTo }, accessLevel ?? "write", context);
     } catch (error) {
       // Cancellation isn't a share failure: honor it rather than returning a result.
       context.signal?.throwIfAborted();
@@ -85,7 +138,7 @@ export async function createCanvas(
   return {
     canvasId,
     url: await canvasUrl(token, canvasId, context),
-    sharedWith: shareError === undefined ? (channelId ?? null) : null,
+    sharedWith: shareError === undefined ? (shareTo ?? null) : null,
     ...(shareError === undefined ? {} : { shareError }),
   };
 }
@@ -95,23 +148,28 @@ export const canvasTools = (tool: ToolFactory) => [
     name: "slack_canvas_create",
     label: "Create Slack canvas",
     description:
-      "Create a Slack canvas from markdown. Optionally share it to a channel with read or write access. If sharing fails, the canvas still exists: the result has sharedWith null and a shareError.",
+      "Create a Slack canvas from markdown. Optionally share it to channels with read or write access; use slack_canvas_access_set to share with users or grant owner. If sharing fails, the canvas still exists: the result has sharedWith null and a shareError.",
     parameters: Type.Object({
       title: Type.String({ description: "Canvas title." }),
       markdown: Type.String({
         description: "Canvas body as markdown. Supports headings, lists, checklists, tables, code.",
       }),
-      channelId: Type.Optional(channelIdParam("Share the new canvas with this channel.")),
+      channelIds: Type.Optional(
+        Type.Array(Type.String({ description: CHANNEL_ID_DESCRIPTION }), {
+          uniqueItems: true,
+          description: "Share the new canvas with these channels.",
+        }),
+      ),
       accessLevel: Type.Optional(
         Type.Union([Type.Literal("read"), Type.Literal("write")], {
-          description: "Channel access level when channelId is set. Default: write.",
+          description: "Channel access level when channelIds is set. Default: write.",
         }),
       ),
     }),
     outputSchema: createdCanvasSchema,
-    async execute({ title, markdown, channelId, accessLevel }, config, context) {
+    async execute({ title, markdown, channelIds, accessLevel }, config, context) {
       context.signal?.throwIfAborted();
-      return createCanvas(resolveToken(config), { title, markdown, channelId, accessLevel }, context);
+      return createCanvas(resolveToken(config), { title, markdown, channelIds, accessLevel }, context);
     },
   }),
 
@@ -247,6 +305,61 @@ export const canvasTools = (tool: ToolFactory) => [
       // Curated to the ID (see "Output shaping" in schemas.ts): it's all an edit needs.
       const sections = (data.sections ?? []) as { id?: unknown }[];
       return { sections: sections.map((section) => ({ id: String(section.id ?? "") })) };
+    },
+  }),
+
+  tool({
+    name: "slack_canvas_access_set",
+    label: "Set Slack canvas access",
+    description:
+      "Grant channels or users read, write, or owner access to a canvas. Set channelIds or userIds, not both; owner applies to users only. Setting access again changes the level.",
+    parameters: Type.Object({
+      canvasId: Type.String({ description: "Canvas ID, e.g. F0166DCSTS7." }),
+      ...canvasTargetParams("grant access"),
+      accessLevel: Type.Union(
+        [Type.Literal("read"), Type.Literal("write"), Type.Literal("owner")],
+        { description: "Access to grant. owner is valid for userIds only." },
+      ),
+    }),
+    outputSchema: Type.Object(
+      {
+        canvasId: Type.String(),
+        accessLevel: Type.String(),
+        ...canvasTargetOutput,
+      },
+      { additionalProperties: false },
+    ),
+    async execute({ canvasId, channelIds, userIds, accessLevel }, config, context) {
+      context.signal?.throwIfAborted();
+      const target = canvasAccessTarget(channelIds, userIds);
+      await setCanvasAccess(resolveToken(config), canvasId, target, accessLevel, context);
+      return { canvasId, accessLevel, ...target };
+    },
+  }),
+
+  tool({
+    name: "slack_canvas_access_delete",
+    label: "Revoke Slack canvas access",
+    description:
+      "Revoke channels' or users' access to a canvas. Set channelIds or userIds, not both. Access can be granted again with slack_canvas_access_set.",
+    parameters: Type.Object({
+      canvasId: Type.String({ description: "Canvas ID, e.g. F0166DCSTS7." }),
+      ...canvasTargetParams("revoke access from"),
+    }),
+    outputSchema: Type.Object(
+      { canvasId: Type.String(), revoked: Type.Literal(true), ...canvasTargetOutput },
+      { additionalProperties: false },
+    ),
+    async execute({ canvasId, channelIds, userIds }, config, context) {
+      context.signal?.throwIfAborted();
+      const target = canvasAccessTarget(channelIds, userIds);
+      await callSlack(
+        "canvases.access.delete",
+        resolveToken(config),
+        { canvas_id: canvasId, ...slackTarget(target) },
+        context,
+      );
+      return { canvasId, revoked: true as const, ...target };
     },
   }),
 

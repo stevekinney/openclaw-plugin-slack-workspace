@@ -303,7 +303,7 @@ describe("slack_channel_kickoff", () => {
           { step: "bookmark", ok: true },
         ],
         invited: ["U0A", "U0B"],
-        canvas: { canvasId: "F0CANVAS", sharedWith: "C0NEW" },
+        canvas: { canvasId: "F0CANVAS", sharedWith: ["C0NEW"] },
         bookmark: { id: "Bk0NEW", title: "Tracker" },
       });
       for (const step of result.steps) expect(step.error).toBeUndefined();

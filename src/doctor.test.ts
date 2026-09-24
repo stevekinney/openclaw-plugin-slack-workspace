@@ -83,6 +83,8 @@ describe("auditScopes", () => {
       expect(botAudit.affectedTools).toEqual([
         { tool: "slack_canvas_create", missing: ["canvases:write"] },
         { tool: "slack_canvas_edit", missing: ["canvases:write"] },
+        { tool: "slack_canvas_access_set", missing: ["canvases:write"] },
+        { tool: "slack_canvas_access_delete", missing: ["canvases:write"] },
         { tool: "slack_canvas_delete", missing: ["canvases:write"] },
         { tool: "slack_channel_kickoff", missing: ["canvases:write"] },
       ]);

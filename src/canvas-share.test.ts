@@ -34,7 +34,7 @@ describe("slack_canvas_create partial share failure", () => {
       const result = await runTool("slack_canvas_create", {
         title: "t",
         markdown: "m",
-        channelId: "C0TEST",
+        channelIds: ["C0TEST"],
       });
       expect(result).toEqual({
         canvasId: "F0CANVAS",
@@ -55,12 +55,12 @@ describe("slack_canvas_create partial share failure", () => {
         const result = await runTool("slack_canvas_create", {
           title: "t",
           markdown: "m",
-          channelId: "C0TEST",
+          channelIds: ["C0TEST"],
         });
         expect(result).toEqual({
           canvasId: "F0CANVAS",
           url: `${ORIGIN}/docs/${TEAM_ID}/F0CANVAS`,
-          sharedWith: "C0TEST",
+          sharedWith: ["C0TEST"],
         });
         expect(Value.Check(createOutputSchema!, result)).toBe(true);
       },
@@ -77,7 +77,7 @@ describe("slack_canvas_create partial share failure", () => {
       },
       async (calls) => {
         await expect(
-          tool.execute("test-call", { title: "t", markdown: "m", channelId: "C0TEST" }, controller.signal),
+          tool.execute("test-call", { title: "t", markdown: "m", channelIds: ["C0TEST"] }, controller.signal),
         ).rejects.toThrow("cancelled");
         expect(calls.map((call) => call.method)).not.toContain("auth.test");
       },
@@ -90,7 +90,7 @@ describe("slack_canvas_create partial share failure", () => {
         call.method === "canvases.create" ? { ok: false, error: "invalid_auth" } : shareFails(call),
       async (calls) => {
         await expect(
-          runTool("slack_canvas_create", { title: "t", markdown: "m", channelId: "C0TEST" }),
+          runTool("slack_canvas_create", { title: "t", markdown: "m", channelIds: ["C0TEST"] }),
         ).rejects.toThrow("invalid_auth");
         expect(calls.map((call) => call.method)).not.toContain("canvases.access.set");
       },
