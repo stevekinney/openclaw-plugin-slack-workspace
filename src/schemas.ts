@@ -72,6 +72,17 @@ export const CHANNEL_ID_DESCRIPTION = "Channel or DM ID, e.g. C0C42LZQZGQ or D0B
 export const channelIdParam = (note?: string) =>
   Type.String({ description: note ? `${CHANNEL_ID_DESCRIPTION} ${note}` : CHANNEL_ID_DESCRIPTION });
 
+export const ACTIVE_CHANNEL_NOTE =
+  "Omit to use the current Slack conversation when replying in one; required from cron jobs, automations, and other channels.";
+
+/**
+ * `channelIdParam`, but optional: omitted, it defaults to the active Slack turn's
+ * conversation (see `resolveChannelId`). Only for tools that post into or read the
+ * conversation, never for tools that change a channel itself.
+ */
+export const activeChannelIdParam = (note?: string) =>
+  Type.Optional(channelIdParam(note ? `${note} ${ACTIVE_CHANNEL_NOTE}` : ACTIVE_CHANNEL_NOTE));
+
 export const threadTsParam = Type.Optional(
   Type.String({ description: "Post as a reply to this message timestamp." }),
 );
@@ -146,7 +157,7 @@ export const toSlackMetadata = (metadata: { eventType: string; eventPayload: Rec
 
 /** Where a structured post lands: a channel, optionally a thread, optionally in place. */
 export const targetParams = {
-  channelId: channelIdParam(),
+  channelId: activeChannelIdParam(),
   threadTs: threadTsParam,
   replyBroadcast: replyBroadcastParam,
   updateTs: Type.Optional(
