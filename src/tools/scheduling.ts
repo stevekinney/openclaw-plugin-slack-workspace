@@ -56,7 +56,8 @@ export const schedulingTools = (tool: ToolFactory) => [
         context,
       );
       return {
-        channelId,
+        // Slack resolves a user ID to its D… channel; slack_scheduled_cancel needs that one.
+        channelId: String(data.channel ?? channelId),
         scheduledMessageId: String(data.scheduled_message_id ?? ""),
         postAt: seconds,
         postAtIso: new Date(seconds * 1000).toISOString(),

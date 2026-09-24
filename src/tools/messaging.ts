@@ -35,11 +35,16 @@ async function postOrUpdate(
   if (args.updateTs) {
     body.ts = args.updateTs;
     const data = await callSlack("chat.update", token, body, context);
-    return { channelId: args.channelId, ts: String(data.ts ?? args.updateTs), updated: true };
+    return {
+      channelId: String(data.channel ?? args.channelId),
+      ts: String(data.ts ?? args.updateTs),
+      updated: true,
+    };
   }
   if (args.threadTs) body.thread_ts = args.threadTs;
   const data = await callSlack("chat.postMessage", token, body, context);
-  return { channelId: args.channelId, ts: String(data.ts ?? ""), updated: false };
+  // A user ID opens a DM; Slack returns the resolved D… channel, which follow-up calls need.
+  return { channelId: String(data.channel ?? args.channelId), ts: String(data.ts ?? ""), updated: false };
 }
 
 export const messagingTools = (tool: ToolFactory) => [
