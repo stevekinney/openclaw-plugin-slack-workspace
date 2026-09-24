@@ -46,7 +46,50 @@ missing required field: value [json-pointer:/blocks/2/rows/1/2]
 
 Read the pointer as `blocks[2].rows[1][2]`.
 
+## Feedback buttons
+
+`context_actions` puts one-tap controls in a message's footer. Use it with a
+`feedback_buttons` element to let a user rate an answer 👍/👎. You don't need a
+dedicated tool. Post these blocks with `slack_blocks_send` under the answer:
+
+```json
+[
+  { "type": "markdown", "text": "Here's the answer…" },
+  {
+    "type": "context_actions",
+    "elements": [
+      {
+        "type": "feedback_buttons",
+        "action_id": "answer_feedback",
+        "positive_button": {
+          "text": { "type": "plain_text", "text": "👍" },
+          "accessibility_label": "Mark this answer as helpful",
+          "value": "positive"
+        },
+        "negative_button": {
+          "text": { "type": "plain_text", "text": "👎" },
+          "accessibility_label": "Mark this answer as unhelpful",
+          "value": "negative"
+        }
+      }
+    ]
+  }
+]
+```
+
+- Max 5 elements. They must be `feedback_buttons` or `icon_button`.
+- Messages only. It isn't a modal or Home tab block.
+- `value` is what comes back when a user clicks. Put an answer or task id in it
+  (e.g. `"positive:T-1"`) if you need to match the vote to the answer later.
+- Clicks come back as `block_actions` events over the Slack channel plugin's Socket
+  Mode connection, not to this plugin. The buttons render and take a click, but
+  none of these tools read the vote.
+
+**Live verification pending.** The snippet passes through `slack_blocks_send`
+unchanged (mocked test). It hasn't been posted to a real workspace yet. Once it
+has, move `context_actions` into the "Verified posting" table.
+
 ## Surfaces not yet tested
 
-`container`, `context_actions`, `file`, `image`, `input`, `video`, `task_card` standalone
-(only exercised nested inside `plan`).
+`container`, `context_actions` (documented above, live post pending), `file`, `image`,
+`input`, `video`, `task_card` standalone (only exercised nested inside `plan`).
