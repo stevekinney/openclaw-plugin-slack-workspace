@@ -71,6 +71,8 @@ export const canvasTools = (tool: ToolFactory) => [
             context,
           );
         } catch (error) {
+          // Cancellation isn't a share failure: honor it rather than returning a result.
+          context.signal?.throwIfAborted();
           shareError = error instanceof Error ? error.message : String(error);
         }
       }

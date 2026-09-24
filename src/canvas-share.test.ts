@@ -3,7 +3,7 @@ import { Value } from "typebox/value";
 import { getToolPluginMetadata } from "openclaw/plugin-sdk/tool-plugin";
 import entry from "./index.js";
 import { resetWorkspaceCache } from "./client.js";
-import { runTool, withMockFetch, type RecordedCall } from "./test-utils.js";
+import { registerPlugin, runTool, withMockFetch, type RecordedCall } from "./test-utils.js";
 
 const ORIGIN = "https://example-workspace.slack.com";
 const TEAM_ID = "T0TEST";
@@ -63,6 +63,23 @@ describe("slack_canvas_create partial share failure", () => {
           sharedWith: "C0TEST",
         });
         expect(Value.Check(createOutputSchema!, result)).toBe(true);
+      },
+    );
+  });
+
+  it("rethrows instead of reporting shareError when cancelled during sharing", async () => {
+    const controller = new AbortController();
+    const tool = registerPlugin().tools.find((tool) => tool.name === "slack_canvas_create")!;
+    await withMockFetch(
+      (call) => {
+        if (call.method === "canvases.access.set") controller.abort(new Error("cancelled"));
+        return shareFails(call);
+      },
+      async (calls) => {
+        await expect(
+          tool.execute("test-call", { title: "t", markdown: "m", channelId: "C0TEST" }, controller.signal),
+        ).rejects.toThrow("cancelled");
+        expect(calls.map((call) => call.method)).not.toContain("auth.test");
       },
     );
   });
