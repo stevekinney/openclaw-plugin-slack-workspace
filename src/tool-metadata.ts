@@ -60,4 +60,6 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
   slack_list_items_delete_multiple: write,
   slack_list_items_list: read,
   slack_list_item_info: read,
+  slack_list_access_set: idempotentWrite,
+  slack_list_access_delete: idempotentWrite,
 };

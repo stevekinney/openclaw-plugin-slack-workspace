@@ -1,5 +1,13 @@
 import { Type } from "typebox";
 import { callSlack, resolveToken, type PluginConfig, type SlackCallContext } from "../client.js";
+import {
+  accessLevelParam,
+  accessTarget,
+  accessTargetOutput,
+  accessTargetParams,
+  assertAccessLevel,
+  slackAccessTarget,
+} from "../access.js";
 import type { ApprovalRule } from "../approvals.js";
 import { cursorParams, toPage, walkPages } from "../pagination.js";
 import type { ToolFactory } from "../schemas.js";
@@ -597,6 +605,58 @@ export const listTools = (tool: ToolFactory) => [
         item: curateItem((data.record ?? {}) as RawItem),
         subtasks: subtasks.map(curateItem),
       };
+    },
+  }),
+  tool({
+    name: "slack_list_access_set",
+    label: "Set Slack list access",
+    description:
+      "Grant channels or users read, write, or owner access to a Slack List. Set channelIds or userIds, not both; owner applies to users only. Setting access again changes the level.",
+    parameters: Type.Object({
+      listId: Type.String({ description: "List ID, e.g. F0123ABCD." }),
+      ...accessTargetParams("grant access"),
+      accessLevel: accessLevelParam,
+    }),
+    outputSchema: Type.Object(
+      { listId: Type.String(), accessLevel: Type.String(), ...accessTargetOutput },
+      { additionalProperties: false },
+    ),
+    async execute({ listId, channelIds, userIds, accessLevel }, config, context) {
+      context.signal?.throwIfAborted();
+      const target = accessTarget(channelIds, userIds);
+      assertAccessLevel(target, accessLevel);
+      await callSlack(
+        "slackLists.access.set",
+        resolveToken(config),
+        { list_id: listId, ...slackAccessTarget(target), access_level: accessLevel },
+        context,
+      );
+      return { listId, accessLevel, ...target };
+    },
+  }),
+  tool({
+    name: "slack_list_access_delete",
+    label: "Revoke Slack list access",
+    description:
+      "Revoke channels' or users' access to a Slack List. Set channelIds or userIds, not both. Access can be granted again with slack_list_access_set.",
+    parameters: Type.Object({
+      listId: Type.String({ description: "List ID, e.g. F0123ABCD." }),
+      ...accessTargetParams("revoke access from"),
+    }),
+    outputSchema: Type.Object(
+      { listId: Type.String(), revoked: Type.Literal(true), ...accessTargetOutput },
+      { additionalProperties: false },
+    ),
+    async execute({ listId, channelIds, userIds }, config, context) {
+      context.signal?.throwIfAborted();
+      const target = accessTarget(channelIds, userIds);
+      await callSlack(
+        "slackLists.access.delete",
+        resolveToken(config),
+        { list_id: listId, ...slackAccessTarget(target) },
+        context,
+      );
+      return { listId, revoked: true as const, ...target };
     },
   }),
 ];

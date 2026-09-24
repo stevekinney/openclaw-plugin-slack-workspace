@@ -53,6 +53,8 @@ describe("slack-workspace", () => {
       "slack_list_items_delete_multiple",
       "slack_list_items_list",
       "slack_list_item_info",
+      "slack_list_access_set",
+      "slack_list_access_delete",
     ]);
   });
 
