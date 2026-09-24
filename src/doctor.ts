@@ -23,6 +23,7 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind; scopes: string[] }>
   slack_canvas_create: { token: "bot", scopes: ["canvases:write"] },
   slack_canvas_edit: { token: "bot", scopes: ["canvases:write"] },
   slack_canvas_sections: { token: "bot", scopes: ["canvases:read"] },
+  slack_canvas_list: { token: "bot", scopes: ["files:read"] },
   slack_canvas_access_set: { token: "bot", scopes: ["canvases:write"] },
   slack_canvas_access_delete: { token: "bot", scopes: ["canvases:write"] },
   slack_canvas_delete: { token: "bot", scopes: ["canvases:write"] },

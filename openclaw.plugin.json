@@ -116,6 +116,7 @@
       "slack_canvas_create",
       "slack_canvas_edit",
       "slack_canvas_sections",
+      "slack_canvas_list",
       "slack_canvas_access_set",
       "slack_canvas_access_delete",
       "slack_canvas_delete",
@@ -222,6 +223,13 @@
       ]
     },
     "slack_canvas_sections": {
+      "sideEffecting": false,
+      "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_canvas_list": {
       "sideEffecting": false,
       "replaySafe": true,
       "profiles": [

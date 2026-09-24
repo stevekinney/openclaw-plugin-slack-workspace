@@ -10,7 +10,7 @@ import {
 } from "../client.js";
 import type { ApprovalRule } from "../approvals.js";
 import { cursorParams, toPage, walkPages } from "../pagination.js";
-import { CHANNEL_ID_DESCRIPTION, type ToolFactory } from "../schemas.js";
+import { CHANNEL_ID_DESCRIPTION, channelIdParam, type ToolFactory } from "../schemas.js";
 
 /** Null when the workspace can't be looked up: better no link than one that 404s. */
 async function canvasUrl(token: string, canvasId: string, context: SlackCallContext) {
@@ -650,6 +650,79 @@ export const canvasTools = (tool: ToolFactory) => [
       );
       // Curated to the ID (see "Output shaping" in schemas.ts): it's all an edit needs.
       return { sections: ids.map((id) => ({ id })) };
+    },
+  }),
+
+  tool({
+    name: "slack_canvas_list",
+    label: "List Slack canvases",
+    description:
+      "List standalone and channel canvases the app can see, to find a canvasId without already knowing it. Filter by channel or creator. Results are paged: if hasMore is true, call again with page + 1.",
+    parameters: Type.Object({
+      channelId: Type.Optional(channelIdParam("Only canvases shared in this channel.")),
+      userId: Type.Optional(
+        Type.String({ description: "Only canvases created by this user, e.g. U0123ABCD." }),
+      ),
+      page: Type.Optional(Type.Integer({ minimum: 1, description: "Page to fetch. Default: 1." })),
+      count: Type.Optional(
+        Type.Integer({ minimum: 1, maximum: 100, description: "Canvases per page. Default: 100." }),
+      ),
+    }),
+    outputSchema: Type.Object(
+      {
+        canvases: Type.Array(
+          Type.Object(
+            {
+              canvasId: Type.String(),
+              title: Type.String(),
+              createdBy: Type.String(),
+              created: Type.Number({ description: "Unix seconds." }),
+              updated: Type.Optional(Type.Number({ description: "Unix seconds." })),
+              url: Type.Union([Type.String(), Type.Null()]),
+              channelIds: Type.Array(Type.String(), {
+                description: "Channels and DMs the canvas is shared in that the app can see.",
+              }),
+            },
+            { additionalProperties: false },
+          ),
+        ),
+        page: Type.Integer(),
+        pages: Type.Integer(),
+        total: Type.Integer(),
+        hasMore: Type.Boolean(),
+      },
+      { additionalProperties: false },
+    ),
+    async execute({ channelId, userId, page, count }, config, context) {
+      context.signal?.throwIfAborted();
+      // Canvases are files: Slack's documented discovery path is files.list with
+      // types=canvas (files:read), paged by page/count rather than a cursor.
+      const body: Record<string, unknown> = { types: "canvas" };
+      if (channelId) body.channel = channelId;
+      if (userId) body.user = userId;
+      if (page !== undefined) body.page = page;
+      if (count !== undefined) body.count = count;
+      const data = await callSlack("files.list", resolveToken(config), body, context, true);
+      const files = (data.files ?? []) as Record<string, unknown>[];
+      const paging = (data.paging ?? {}) as { page?: unknown; pages?: unknown; total?: unknown };
+      const current = Number(paging.page ?? page ?? 1);
+      const pages = Number(paging.pages ?? current);
+      const strings = (value: unknown) => (Array.isArray(value) ? value.map(String) : []);
+      return {
+        canvases: files.map((file) => ({
+          canvasId: String(file.id ?? ""),
+          title: String(file.title || file.name || ""),
+          createdBy: String(file.user ?? ""),
+          created: Number(file.created ?? 0),
+          ...(typeof file.updated === "number" ? { updated: file.updated } : {}),
+          url: typeof file.permalink === "string" && file.permalink ? file.permalink : null,
+          channelIds: [...strings(file.channels), ...strings(file.groups), ...strings(file.ims)],
+        })),
+        page: current,
+        pages,
+        total: Number(paging.total ?? files.length),
+        hasMore: current < pages,
+      };
     },
   }),
 
