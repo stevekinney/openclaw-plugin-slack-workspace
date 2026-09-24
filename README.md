@@ -79,6 +79,10 @@ Most tools don't need an explicit join. When a bot-token call fails with `not_in
 
 [`docs/workflow-builder-gateway-bridge.md`](docs/workflow-builder-gateway-bridge.md) covers the opposite direction: a Workflow Builder workflow that hands a prompt to an OpenClaw agent through the Gateway's `POST /hooks/agent` endpoint. OpenClaw posts the agent's reply straight to a Slack channel. It needs no plugin code and no new scopes, but it does need `hooks.enabled`, a public Gateway origin (roadmap O-06), and a small custom-step Slack app, because Workflow Builder has no built-in outbound HTTP step. The recipe hasn't been run live yet; roadmap H-03 tracks that.
 
+## Inbound webhooks
+
+[`docs/inbound-webhooks.md`](docs/inbound-webhooks.md) maps the ways an external system can reach OpenClaw or Slack to when to use each. The options are OpenClaw's Gateway hooks (`/hooks/wake`, `/hooks/agent` with direct Slack delivery, and mapped `/hooks/<name>`), the bundled Webhooks plugin for TaskFlow state (which never starts an agent), and Slack's own `incoming-webhook` URL (which bypasses OpenClaw entirely). None of them needs code in this plugin, which is why it doesn't run an HTTP listener of its own.
+
 ## Scope doctor
 
 `openclaw slack-workspace doctor` calls the read-only `auth.test` once per configured token and compares the scopes Slack actually granted against what each tool needs. Missing scopes are listed with the tools they break. This catches a Slack app whose manifest gained scopes that were never reinstalled. Pass `--json` for machine-readable output. The command exits non-zero on any gap, unavailable token, or rejected token. The per-tool requirements live in `TOOL_SCOPES` in `src/doctor.ts`. When you add a tool, add its entry there; a test fails if one is missing.
