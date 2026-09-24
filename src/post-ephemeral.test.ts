@@ -53,6 +53,14 @@ describe("slack_post_ephemeral", () => {
     });
   });
 
+  it("throws when Slack omits message_ts", async () => {
+    await withMockFetch(() => ({ ok: true }), async () => {
+      await expect(
+        runTool("slack_post_ephemeral", { channelId: "C0TEAM", userId: "U0ALICE", text: "hi" }),
+      ).rejects.toThrow("returned no message_ts");
+    });
+  });
+
   it("returns output that matches its schema", async () => {
     await withMockFetch(() => posted, async () => {
       const result = await runTool("slack_post_ephemeral", {

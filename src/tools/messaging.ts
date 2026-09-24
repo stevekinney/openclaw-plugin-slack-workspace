@@ -748,7 +748,10 @@ export const messagingTools = (tool: ToolFactory) => [
       if (blocks) body.blocks = blocks;
       if (threadTs) body.thread_ts = threadTs;
       const data = await callSlack("chat.postEphemeral", resolveToken(config, "bot"), body, context);
-      return { channelId, userId, ephemeralTs: String(data.message_ts ?? "") };
+      if (typeof data.message_ts !== "string" || !data.message_ts) {
+        throw new Error("chat.postEphemeral succeeded but returned no message_ts.");
+      }
+      return { channelId, userId, ephemeralTs: data.message_ts };
     },
   }),
 ];
