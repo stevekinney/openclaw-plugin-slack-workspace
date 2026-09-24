@@ -16,6 +16,19 @@ or one row and its subtasks with `slack_list_item_info`.
 Share a list with `slack_list_access_set` (channels get read or write; users can also
 get owner) and take access away with `slack_list_access_delete`.
 
+## Finding a list you didn't create
+
+There's no Slack method that lists every List in a workspace or channel, so there's
+no `slack_list_*` discovery tool. None of the `slackLists.*` methods enumerate Lists,
+and `files.list`'s documented type filters don't include one for Lists. Get a
+`list_id` one of these ways:
+
+- **Keep it** from the `slack_list_create` call that made the list.
+- **Take it from a link.** A List's URL contains its ID, which starts with `F`.
+- **Search for it** with `slack_search` (`scope: "files"`) using the list's name. This
+  is unverified for Lists: they're stored as files, but whether search returns them
+  hasn't been confirmed against a live workspace.
+
 ## The schema is fixed once the list exists
 
 `slackLists.update` accepts only `name`, `description_blocks`, and `todo_mode`. No
