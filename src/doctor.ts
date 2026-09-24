@@ -76,6 +76,7 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind; scopes: string[] }>
   // lists:read resolves an existing list's columns; groups:/im:/mpim:history as for canvases.
   slack_list_from_thread: { token: "bot", scopes: ["channels:history", "lists:read", "lists:write"] },
   slack_file_upload: { token: "bot", scopes: ["files:write"] },
+  slack_assistant_set_title: { token: "bot", scopes: ["assistant:write"] },
 };
 
 export type TokenAudit = {

@@ -65,6 +65,10 @@ Most tools don't need an explicit join. When a bot-token call fails with `not_in
 
 `slack_post_ephemeral` wraps `chat.postEphemeral` to send one user a private nudge inside a shared channel or thread, so nobody else sees it. It takes `channelId`, `userId`, `text`, and optional `blocks` and `threadTs`, and it uses the bot token with the `chat:write` scope. The user has to be a member of the channel. The result is `{ channelId, userId, ephemeralTs }`, and it deliberately has no `ts` field: `chat.update` can't target an ephemeral message, so `ephemeralTs` is for reference only and won't work with `slack_blocks_update` or `updateTs`. Ephemeral messages don't persist, either. They vanish when the user reloads Slack.
 
+## Assistant thread titles
+
+`slack_assistant_set_title` wraps `assistant.threads.setTitle` to rename the title Slack shows for an Agent View or Assistant View thread, so the agent can swap the default title for something descriptive once it knows what the conversation is about. It takes `channelId`, `threadTs` (the assistant thread's root), and `title`, and it uses the bot token with the `assistant:write` scope. It only works on those Slack-managed assistant threads, not ordinary channel or DM threads. The bundled Slack channel plugin never calls `setTitle` itself, so this tool doesn't compete with core. The result is `{ channelId, threadTs, title }`.
+
 ## Scope doctor
 
 `openclaw slack-workspace doctor` calls the read-only `auth.test` once per configured token and compares the scopes Slack actually granted against what each tool needs. Missing scopes are listed with the tools they break. This catches a Slack app whose manifest gained scopes that were never reinstalled. Pass `--json` for machine-readable output. The command exits non-zero on any gap, unavailable token, or rejected token. The per-tool requirements live in `TOOL_SCOPES` in `src/doctor.ts`. When you add a tool, add its entry there; a test fails if one is missing.

@@ -10,6 +10,7 @@ import {
 } from "./test-utils.js";
 
 const BOT_SCOPES = [
+  "assistant:write",
   "chat:write",
   "canvases:read",
   "canvases:write",
@@ -62,6 +63,7 @@ describe("auditScopes", () => {
         identity: "test-bot",
         granted: BOT_SCOPES,
         required: [
+          "assistant:write",
           "bookmarks:read",
           "bookmarks:write",
           "canvases:read",
