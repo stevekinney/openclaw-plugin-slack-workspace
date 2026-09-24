@@ -1,7 +1,7 @@
 {
   "id": "slack-workspace",
   "name": "Slack Workspace",
-  "description": "Slack workspace tools: identity and message scheduling, search, structured messaging (tables, plans, charts), raw Block Kit messages, canvases, and channel bookmarks.",
+  "description": "Slack workspace tools: identity and message scheduling, search, structured messaging (tables, plans, charts), raw Block Kit messages, canvases, channel bookmarks, and public-channel lifecycle (create, archive, rename, topic, purpose, invite).",
   "version": "0.1.0",
   "configSchema": {
     "type": "object",
@@ -107,7 +107,13 @@
       "slack_canvas_sections",
       "slack_bookmark_list",
       "slack_bookmark_add",
-      "slack_bookmark_remove"
+      "slack_bookmark_remove",
+      "slack_channel_create",
+      "slack_channel_archive",
+      "slack_channel_rename",
+      "slack_channel_set_topic",
+      "slack_channel_set_purpose",
+      "slack_channel_invite"
     ]
   },
   "toolMetadata": {
@@ -217,6 +223,48 @@
       ]
     },
     "slack_bookmark_remove": {
+      "sideEffecting": true,
+      "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_channel_create": {
+      "sideEffecting": true,
+      "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_channel_archive": {
+      "sideEffecting": true,
+      "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_channel_rename": {
+      "sideEffecting": true,
+      "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_channel_set_topic": {
+      "sideEffecting": true,
+      "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_channel_set_purpose": {
+      "sideEffecting": true,
+      "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_channel_invite": {
       "sideEffecting": true,
       "replaySafe": false,
       "profiles": [

@@ -26,6 +26,13 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind; scopes: string[] }>
   slack_bookmark_list: { token: "bot", scopes: ["bookmarks:read"] },
   slack_bookmark_add: { token: "bot", scopes: ["bookmarks:write"] },
   slack_bookmark_remove: { token: "bot", scopes: ["bookmarks:write"] },
+  slack_channel_create: { token: "bot", scopes: ["channels:manage"] },
+  // Every channel tool but create reads conversations.info first to refuse private channels.
+  slack_channel_archive: { token: "bot", scopes: ["channels:read", "channels:manage"] },
+  slack_channel_rename: { token: "bot", scopes: ["channels:read", "channels:manage"] },
+  slack_channel_set_topic: { token: "bot", scopes: ["channels:read", "channels:write.topic"] },
+  slack_channel_set_purpose: { token: "bot", scopes: ["channels:read", "channels:manage"] },
+  slack_channel_invite: { token: "bot", scopes: ["channels:read", "channels:write.invites"] },
 };
 
 export type TokenAudit = {
