@@ -11,7 +11,7 @@ const READ_ONLY_NOTE = "Read-only: usergroups:write is not granted, so groups ca
 const includeDisabledParam = () =>
   Type.Optional(Type.Boolean({ description: "Include disabled user groups. Default: false." }));
 
-/** Curated user group (see "Output shaping" in schemas.ts): Slack's carries ~20 audit fields. */
+/** Curated user group (see "Output shaping" in schemas.ts): Slack's own user group object carries ~20 audit fields. */
 const slackUsergroup = Type.Object(
   {
     id: Type.String({ description: "User group ID (S…), for slack_usergroup_members." }),
