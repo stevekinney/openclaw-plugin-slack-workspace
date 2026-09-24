@@ -149,7 +149,8 @@
       "slack_list_access_set",
       "slack_list_access_delete",
       "slack_list_from_thread",
-      "slack_file_upload"
+      "slack_file_upload",
+      "slack_assistant_set_title"
     ]
   },
   "toolMetadata": {
@@ -478,6 +479,13 @@
     "slack_file_upload": {
       "sideEffecting": true,
       "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_assistant_set_title": {
+      "sideEffecting": true,
+      "replaySafe": true,
       "profiles": [
         "messaging"
       ]

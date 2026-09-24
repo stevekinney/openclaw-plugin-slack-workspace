@@ -60,6 +60,7 @@ describe("slack-workspace", () => {
       "slack_list_access_delete",
       "slack_list_from_thread",
       "slack_file_upload",
+      "slack_assistant_set_title",
     ]);
   });
 

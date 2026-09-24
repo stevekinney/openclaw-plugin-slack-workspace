@@ -1,4 +1,5 @@
 import { defineTool } from "../tool.js";
+import { assistantTools } from "./assistant.js";
 import { bookmarkTools } from "./bookmarks.js";
 import { canvasTools } from "./canvases.js";
 import { channelTools } from "./channels.js";
@@ -20,4 +21,5 @@ export const tools = [
   ...channelTools(defineTool),
   ...listTools(defineTool),
   ...fileTools(defineTool),
+  ...assistantTools(defineTool),
 ];
