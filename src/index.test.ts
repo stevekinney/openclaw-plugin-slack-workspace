@@ -3,6 +3,7 @@ import entry from "./index.js";
 import { getToolPluginMetadata } from "openclaw/plugin-sdk/tool-plugin";
 import {
   recordingLogger,
+  registerPlugin,
   runTool,
   slackResponse,
   TEST_CONFIG,
@@ -29,6 +30,29 @@ describe("slack-workspace", () => {
       "slack_bookmark_add",
       "slack_bookmark_remove",
     ]);
+  });
+
+  it("registers the same tools it declares, through api.registerTool", () => {
+    expect(registerPlugin().tools.map((tool) => tool.name)).toEqual(
+      getToolPluginMetadata(entry)?.tools.map((tool) => tool.name),
+    );
+  });
+
+  it("registers a before_tool_call hook scoped to its own tools", () => {
+    const { tools, hooks } = registerPlugin();
+    const hook = hooks.find((candidate) => candidate.hookName === "before_tool_call");
+    expect(hook).toBeDefined();
+    expect(hook?.opts?.matcher).toEqual(tools.map((tool) => tool.name));
+  });
+
+  it("lets every tool call through until a policy is registered", async () => {
+    const { hooks } = registerPlugin();
+    const hook = hooks.find((candidate) => candidate.hookName === "before_tool_call")!;
+    const decision = await hook.handler(
+      { toolName: "slack_bookmark_remove", params: { channelId: "C0TEST", bookmarkId: "Bk1" } },
+      {},
+    );
+    expect(decision).toBeUndefined();
   });
 });
 
@@ -329,12 +353,7 @@ describe("Slack HTTP client hardening", () => {
 
   it("stops retrying when the call is aborted during backoff", async () => {
     vi.useFakeTimers();
-    const tools: { name: string; execute: (...args: unknown[]) => Promise<unknown> }[] = [];
-    (entry as unknown as { register: (api: unknown) => void }).register({
-      pluginConfig: { botToken: "xoxb-test" },
-      logger: { info() {}, warn() {}, error() {} },
-      registerTool: (tool: (typeof tools)[number]) => tools.push(tool),
-    });
+    const { tools } = registerPlugin({ botToken: "xoxb-test" });
     const bookmarkList = tools.find((tool) => tool.name === "slack_bookmark_list")!;
     const controller = new AbortController();
     await withMockFetch(

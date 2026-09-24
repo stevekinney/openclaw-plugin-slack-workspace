@@ -93,6 +93,34 @@ export function recordingLogger(lines: LogLine[] = []) {
   };
 }
 
+/** One `api.on(...)` registration captured from the fake plugin API. */
+export type RegisteredHook = {
+  hookName: string;
+  handler: (event: Record<string, unknown>, ctx: Record<string, unknown>) => unknown;
+  opts?: { matcher?: readonly string[]; priority?: number };
+};
+
+/**
+ * Run the plugin's `register(api)` against a minimal fake API and return every tool
+ * and hook it registered, in registration order.
+ */
+export function registerPlugin(
+  config: Record<string, unknown> = TEST_CONFIG,
+  logger = recordingLogger(),
+): { tools: RegisteredTool[]; hooks: RegisteredHook[] } {
+  const tools: RegisteredTool[] = [];
+  const hooks: RegisteredHook[] = [];
+  const api = {
+    pluginConfig: config,
+    logger,
+    registerTool: (tool: RegisteredTool) => tools.push(tool),
+    on: (hookName: string, handler: RegisteredHook["handler"], opts?: RegisteredHook["opts"]) =>
+      hooks.push({ hookName, handler, opts }),
+  };
+  (entry as unknown as { register: (api: unknown) => void }).register(api);
+  return { tools, hooks };
+}
+
 /**
  * Register the plugin against a minimal fake API and invoke one tool the way the
  * host does, returning the JSON `details` payload. Parameters are passed through
@@ -104,13 +132,7 @@ export async function runTool(
   config: Record<string, unknown> = TEST_CONFIG,
   logger = recordingLogger(),
 ): Promise<unknown> {
-  const tools: RegisteredTool[] = [];
-  const api = {
-    pluginConfig: config,
-    logger,
-    registerTool: (tool: RegisteredTool) => tools.push(tool),
-  };
-  (entry as unknown as { register: (api: unknown) => void }).register(api);
+  const { tools } = registerPlugin(config, logger);
   const tool = tools.find((candidate) => candidate.name === name);
   if (!tool) throw new Error(`No registered tool named ${name}.`);
   return (await tool.execute("test-call", params)).details;

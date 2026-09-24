@@ -1,7 +1,6 @@
 /**
- * Manifest `toolMetadata` for every tool. `defineToolPlugin`'s `tool()` only emits
- * `outputSchema` and `optional`, so `scripts/patch-manifest.mjs` merges these into
- * `openclaw.plugin.json` after each build.
+ * Manifest `toolMetadata` for every tool. `openclaw.plugin.json` is hand-authored;
+ * a test keeps its `toolMetadata` identical to this map.
  *
  * `sideEffecting`: the call can change Slack state, so failed attempts must stay visible.
  * `replaySafe`: repeating the call after an incomplete model turn does no harm.
