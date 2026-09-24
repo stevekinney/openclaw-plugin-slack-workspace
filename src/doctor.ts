@@ -12,6 +12,8 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind | "none"; scopes: st
   slack_identity: { token: "bot", scopes: [] },
   slack_search: { token: "user", scopes: ["search:read"] },
   slack_schedule_message: { token: "bot", scopes: ["chat:write"] },
+  // conversations.open finds or opens the DM when reminding a user.
+  slack_remind: { token: "bot", scopes: ["im:write", "chat:write"] },
   // chat.scheduledMessages.list needs no scope.
   slack_scheduled_list: { token: "bot", scopes: [] },
   slack_scheduled_cancel: { token: "bot", scopes: ["chat:write"] },

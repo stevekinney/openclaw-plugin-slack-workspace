@@ -20,6 +20,7 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
   slack_identity: read,
   slack_search: read,
   slack_schedule_message: write,
+  slack_remind: write,
   slack_scheduled_list: read,
   slack_scheduled_cancel: write,
   slack_post_table: write,
