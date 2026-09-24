@@ -29,6 +29,7 @@ describe("slack-workspace", () => {
       "slack_canvas_access_set",
       "slack_canvas_access_delete",
       "slack_canvas_delete",
+      "slack_canvas_channel_get_or_create",
       "slack_bookmark_list",
       "slack_bookmark_add",
       "slack_bookmark_remove",

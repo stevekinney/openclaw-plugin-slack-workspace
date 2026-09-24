@@ -33,6 +33,8 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
   slack_canvas_access_set: idempotentWrite,
   slack_canvas_access_delete: idempotentWrite,
   slack_canvas_delete: write,
+  // Creates only when missing, so a repeat resolves the same canvas.
+  slack_canvas_channel_get_or_create: idempotentWrite,
   slack_bookmark_list: read,
   slack_bookmark_add: write,
   slack_bookmark_remove: write,

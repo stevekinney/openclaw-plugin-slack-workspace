@@ -3,6 +3,7 @@ import {
   callSlack,
   canvasPermalink,
   resolveToken,
+  SlackApiError,
   workspaceFor,
   type SlackCallContext,
 } from "../client.js";
@@ -141,6 +142,48 @@ export async function createCanvas(
     sharedWith: shareError === undefined ? (shareTo ?? null) : null,
     ...(shareError === undefined ? {} : { shareError }),
   };
+}
+
+/** The channel's native canvas tab ID from `conversations.info`, or null if it has none yet. */
+async function channelCanvasId(token: string, channelId: string, context: SlackCallContext) {
+  const data = await callSlack("conversations.info", token, { channel: channelId }, context, true);
+  const channel = (data.channel ?? {}) as { properties?: { canvas?: { file_id?: unknown } } };
+  const fileId = channel.properties?.canvas?.file_id;
+  return typeof fileId === "string" && fileId ? fileId : null;
+}
+
+/**
+ * Resolve a channel's single canvas tab, creating it only when the channel has none.
+ * A channel holds at most one, so a concurrent create surfaces as
+ * `channel_canvas_already_exists`: re-read the winner's ID rather than failing.
+ */
+async function channelCanvasGetOrCreate(
+  token: string,
+  { channelId, title, markdown }: { channelId: string; title?: string; markdown?: string },
+  context: SlackCallContext,
+) {
+  const existing = await channelCanvasId(token, channelId, context);
+  if (existing) return { canvasId: existing, created: false };
+  try {
+    const created = await callSlack(
+      "conversations.canvases.create",
+      token,
+      {
+        channel_id: channelId,
+        ...(title ? { title } : {}),
+        ...(markdown ? { document_content: { type: "markdown", markdown } } : {}),
+      },
+      context,
+    );
+    return { canvasId: String(created.canvas_id ?? ""), created: true };
+  } catch (error) {
+    if (!(error instanceof SlackApiError) || error.code !== "channel_canvas_already_exists") {
+      throw error;
+    }
+    const raced = await channelCanvasId(token, channelId, context);
+    if (!raced) throw error;
+    return { canvasId: raced, created: false };
+  }
 }
 
 export const canvasTools = (tool: ToolFactory) => [
@@ -379,6 +422,44 @@ export const canvasTools = (tool: ToolFactory) => [
       context.signal?.throwIfAborted();
       await callSlack("canvases.delete", resolveToken(config), { canvas_id: canvasId }, context);
       return { deleted: true as const, canvasId };
+    },
+  }),
+
+  tool({
+    name: "slack_canvas_channel_get_or_create",
+    label: "Get or create Slack channel canvas",
+    description:
+      "Get the canvas tab of a channel, creating it if the channel has none yet. A channel has at most one; it shows in the channel header with no bookmark needed. Returns its canvasId either way, with created true only when this call made it. title and markdown apply only on creation: to change an existing channel canvas, use slack_canvas_edit.",
+    parameters: Type.Object({
+      channelId: Type.String({ description: CHANNEL_ID_DESCRIPTION }),
+      title: Type.Optional(
+        Type.String({ description: "Title for the canvas if it is created. Ignored if it exists." }),
+      ),
+      markdown: Type.Optional(
+        Type.String({
+          description:
+            "Initial body as markdown if the canvas is created. Ignored if it exists. Omit for an empty canvas.",
+        }),
+      ),
+    }),
+    outputSchema: Type.Object(
+      {
+        canvasId: Type.String(),
+        channelId: Type.String(),
+        created: Type.Boolean(),
+        url: Type.Union([Type.String(), Type.Null()]),
+      },
+      { additionalProperties: false },
+    ),
+    async execute({ channelId, title, markdown }, config, context) {
+      context.signal?.throwIfAborted();
+      const token = resolveToken(config);
+      const { canvasId, created } = await channelCanvasGetOrCreate(
+        token,
+        { channelId, title, markdown },
+        context,
+      );
+      return { canvasId, channelId, created, url: await canvasUrl(token, canvasId, context) };
     },
   }),
 ];

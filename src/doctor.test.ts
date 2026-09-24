@@ -86,6 +86,7 @@ describe("auditScopes", () => {
         { tool: "slack_canvas_access_set", missing: ["canvases:write"] },
         { tool: "slack_canvas_access_delete", missing: ["canvases:write"] },
         { tool: "slack_canvas_delete", missing: ["canvases:write"] },
+        { tool: "slack_canvas_channel_get_or_create", missing: ["canvases:write"] },
         { tool: "slack_channel_kickoff", missing: ["canvases:write"] },
       ]);
       expect(userAudit).toMatchObject({ status: "missing_scopes", missing: ["search:read"] });
