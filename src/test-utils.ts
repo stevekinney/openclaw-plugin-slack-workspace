@@ -12,6 +12,10 @@ export type RecordedCall = {
   headers: Record<string, string>;
   /** JSON bodies are parsed; form bodies are decoded into a string map. */
   body: Record<string, unknown>;
+  /** HTTP verb, e.g. `POST`. */
+  httpMethod: string;
+  /** The request body exactly as sent, for non-JSON payloads like file bytes. */
+  rawBody: unknown;
 };
 
 /** A handler returns a Slack JSON payload, or a full Response for header/status control. */
@@ -54,6 +58,8 @@ export async function withMockFetch<T>(
       url,
       headers,
       body: decodeBody(init.body, headers["content-type"] ?? ""),
+      httpMethod: init.method ?? "GET",
+      rawBody: init.body,
     };
     calls.push(call);
     const result = await handler(call);
