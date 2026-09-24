@@ -108,6 +108,8 @@ const ERROR_HINTS: Record<string, string> = {
   canvas_editing_locked: "the canvas is locked for editing; try again shortly",
   invalid_primary_column: "a list's primary column must be a text column",
   over_column_maximum: "the list has more columns than Slack allows",
+  restricted_too_many:
+    "Slack allows at most 30 messages scheduled to post within any 5-minute window in one channel; spread the post times out",
   not_in_channel:
     "the bot is not a member of this channel: join a public channel with slack_channel_join, or have someone `/invite @OpenClaw`",
 };

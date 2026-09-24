@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { callSlack, resolveToken } from "../client.js";
+import { callSlack, resolveToken, type SlackCallContext } from "../client.js";
 import type { ApprovalRule } from "../approvals.js";
 import { cursorParams, toPage, walkPages } from "../pagination.js";
 import { blocksSchema, channelIdParam, threadTsParam, type ToolFactory } from "../schemas.js";
@@ -40,6 +40,47 @@ const resolvePostAt = (postAt: string | number, name: string): number => {
   return seconds;
 };
 
+const channelCapNote =
+  "Slack allows 30 messages per 5-minute window per channel, counted by post time; past that it fails with `restricted_too_many`, so spread post times out.";
+
+type ScheduleRequest = {
+  channelId: string;
+  text: string;
+  seconds: number;
+  blocks?: unknown;
+  threadTs?: string;
+};
+
+/** Call chat.scheduleMessage; returns the channel Slack resolved and the new message's ID. */
+const scheduleMessage = async (
+  token: string,
+  { channelId, text, seconds, blocks, threadTs }: ScheduleRequest,
+  context: SlackCallContext,
+) => {
+  const body: Record<string, unknown> = { channel: channelId, text, post_at: seconds };
+  if (blocks) body.blocks = blocks;
+  if (threadTs) body.thread_ts = threadTs;
+  const data = await callSlack("chat.scheduleMessage", token, body, context);
+  return {
+    // Slack resolves a user ID to its D… channel; slack_scheduled_cancel needs that one.
+    channelId: String(data.channel ?? channelId),
+    scheduledMessageId: String(data.scheduled_message_id ?? ""),
+  };
+};
+
+const deleteScheduledMessage = (
+  token: string,
+  channelId: string,
+  scheduledMessageId: string,
+  context: SlackCallContext,
+) =>
+  callSlack(
+    "chat.deleteScheduledMessage",
+    token,
+    { channel: channelId, scheduled_message_id: scheduledMessageId },
+    context,
+  );
+
 const postAtDescription =
   'an ISO-8601 datetime with an explicit offset ("2026-09-23T09:00:00-06:00" or "…Z") or Unix seconds (number or all-digit string). Datetimes without an offset are rejected as ambiguous. Must be in the future and within 120 days.';
 
@@ -47,8 +88,7 @@ export const schedulingTools = (tool: ToolFactory) => [
   tool({
     name: "slack_schedule_message",
     label: "Schedule Slack message",
-    description:
-      "Schedule a message to post at a future time, up to 120 days out. Use for time-based posts that must actually arrive; to remind one person, prefer slack_remind. For recurring work, use an OpenClaw automation instead.",
+    description: `Schedule a message to post at a future time, up to 120 days out. Use for time-based posts that must actually arrive; to remind one person, prefer slack_remind. For recurring work, use an OpenClaw automation instead. To change a pending message, use slack_schedule_reschedule. ${channelCapNote}`,
     parameters: Type.Object({
       channelId: channelIdParam("The message posts here."),
       text: Type.String({ description: "Message text, or the fallback when blocks are set." }),
@@ -71,20 +111,89 @@ export const schedulingTools = (tool: ToolFactory) => [
       context.signal?.throwIfAborted();
 
       const seconds = resolvePostAt(postAt, "postAt");
-
-      const body: Record<string, unknown> = { channel: channelId, text, post_at: seconds };
-      if (blocks) body.blocks = blocks;
-      if (threadTs) body.thread_ts = threadTs;
-      const data = await callSlack(
-        "chat.scheduleMessage",
+      const scheduled = await scheduleMessage(
         resolveToken(config, "bot"),
-        body,
+        { channelId, text, seconds, blocks, threadTs },
         context,
       );
       return {
-        // Slack resolves a user ID to its D… channel; slack_scheduled_cancel needs that one.
-        channelId: String(data.channel ?? channelId),
-        scheduledMessageId: String(data.scheduled_message_id ?? ""),
+        ...scheduled,
+        postAt: seconds,
+        postAtIso: new Date(seconds * 1000).toISOString(),
+      };
+    },
+  }),
+
+  tool({
+    name: "slack_schedule_reschedule",
+    label: "Reschedule Slack message",
+    description: `Replace a pending scheduled message with new text and/or a new time in one call. Slack has no edit method for scheduled messages, so this schedules the replacement first, then cancels the original; if the original can't be cancelled, it withdraws the replacement so only one copy stays pending. The replacement gets a new ID. ${channelCapNote}`,
+    parameters: Type.Object({
+      channelId: channelIdParam("The channel the original was scheduled into."),
+      scheduledMessageId: Type.String({
+        description: "ID of the message to replace, from slack_scheduled_list.",
+      }),
+      text: Type.String({
+        description:
+          "Full text of the replacement, or the fallback when blocks are set. Nothing carries over from the original.",
+      }),
+      postAt: Type.Union([Type.String(), Type.Number()], {
+        description: `When to post the replacement: ${postAtDescription}`,
+      }),
+      blocks: Type.Optional(blocksSchema),
+      threadTs: threadTsParam,
+    }),
+    outputSchema: Type.Object(
+      {
+        channelId: Type.String(),
+        scheduledMessageId: Type.String(),
+        replacedScheduledMessageId: Type.String(),
+        postAt: Type.Number(),
+        postAtIso: Type.String(),
+      },
+      { additionalProperties: false },
+    ),
+    async execute(
+      { channelId, scheduledMessageId, text, postAt, blocks, threadTs },
+      config,
+      context,
+    ) {
+      context.signal?.throwIfAborted();
+      const seconds = resolvePostAt(postAt, "postAt");
+      const token = resolveToken(config, "bot");
+
+      // Schedule first: if Slack refuses the replacement (e.g. the channel cap), the
+      // original is still pending and nothing was lost.
+      const replacement = await scheduleMessage(
+        token,
+        { channelId, text, seconds, blocks, threadTs },
+        context,
+      );
+      try {
+        await deleteScheduledMessage(token, channelId, scheduledMessageId, context);
+      } catch (error) {
+        const reason = (error as Error).message;
+        try {
+          await deleteScheduledMessage(
+            token,
+            replacement.channelId,
+            replacement.scheduledMessageId,
+            context,
+          );
+        } catch (rollbackError) {
+          throw new Error(
+            `Could not cancel ${scheduledMessageId} (${reason}) or withdraw its replacement (${(rollbackError as Error).message}). Both ${scheduledMessageId} and ${replacement.scheduledMessageId} are now scheduled; cancel one with slack_scheduled_cancel.`,
+            { cause: rollbackError },
+          );
+        }
+        throw new Error(
+          `Could not cancel ${scheduledMessageId} (${reason}), so withdrew the replacement ${replacement.scheduledMessageId}. Nothing changed.`,
+          { cause: error },
+        );
+      }
+      return {
+        ...replacement,
+        replacedScheduledMessageId: scheduledMessageId,
         postAt: seconds,
         postAtIso: new Date(seconds * 1000).toISOString(),
       };
@@ -230,10 +339,10 @@ export const schedulingTools = (tool: ToolFactory) => [
     ),
     async execute({ channelId, scheduledMessageId }, config, context) {
       context.signal?.throwIfAborted();
-      await callSlack(
-        "chat.deleteScheduledMessage",
+      await deleteScheduledMessage(
         resolveToken(config, "bot"),
-        { channel: channelId, scheduled_message_id: scheduledMessageId },
+        channelId,
+        scheduledMessageId,
         context,
       );
       return { channelId, scheduledMessageId, cancelled: true };
