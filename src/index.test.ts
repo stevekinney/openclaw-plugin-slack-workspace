@@ -40,6 +40,7 @@ describe("slack-workspace", () => {
       "slack_canvas_from_thread",
       "slack_bookmark_list",
       "slack_bookmark_add",
+      "slack_bookmark_edit",
       "slack_bookmark_remove",
       "slack_channel_create",
       "slack_channel_archive",
