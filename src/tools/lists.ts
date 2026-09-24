@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 import { callSlack, resolveToken, type PluginConfig, type SlackCallContext } from "../client.js";
+import type { ApprovalRule } from "../approvals.js";
 import type { ToolFactory } from "../schemas.js";
 
 /** Column types `slackLists.create` accepts in a `schema`. */
@@ -170,6 +171,92 @@ export function findListOption(column: ListColumn, label: string): string {
   return option.id;
 }
 
+/** A cell value as a caller writes it; `encodeListCell` shapes it per column type. */
+export type ListCellValue = string | number | boolean | string[];
+
+const cellValueParam = Type.Union(
+  [Type.String(), Type.Number(), Type.Boolean(), Type.Array(Type.String())],
+  {
+    description:
+      "Text for text columns; option labels for select; user, channel, or email IDs/addresses (one or an array); dates as YYYY-MM-DD; a number for number and rating; true/false for checkbox.",
+  },
+);
+
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function textValue(column: ListColumn, value: ListCellValue): string {
+  if (Array.isArray(value) || typeof value === "boolean") {
+    throw new Error(`Column "${column.name}" needs a single text value.`);
+  }
+  return String(value);
+}
+
+function listValue(column: ListColumn, value: ListCellValue): string[] {
+  if (typeof value === "boolean") throw new Error(`Column "${column.name}" can't take true or false.`);
+  return Array.isArray(value) ? value : [String(value)];
+}
+
+function numberValue(column: ListColumn, value: ListCellValue): number {
+  const number = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  if (typeof number !== "number" || !Number.isFinite(number)) {
+    throw new Error(`Column "${column.name}" needs a number, got ${JSON.stringify(value)}.`);
+  }
+  return number;
+}
+
+/**
+ * Shape one cell the way `slackLists.items.create`/`.update` expect it for the column's
+ * type: rich_text blocks for text, ID arrays for user/date/select/email/phone/channel,
+ * a bare number for number/rating, and a bare boolean for checkbox.
+ */
+export function encodeListCell(column: ListColumn, value: ListCellValue): Record<string, unknown> {
+  const cell = (key: string, encoded: unknown) => ({ column_id: column.id, [key]: encoded });
+  switch (column.type) {
+    case "text":
+      return cell("rich_text", [
+        {
+          type: "rich_text",
+          elements: [
+            { type: "rich_text_section", elements: [{ type: "text", text: textValue(column, value) }] },
+          ],
+        },
+      ]);
+    case "select":
+    case "multi_select": {
+      const labels = listValue(column, value);
+      if (column.type === "select" && labels.length > 1) {
+        throw new Error(`Column "${column.name}" is single-select; pass one option.`);
+      }
+      return cell("select", labels.map((label) => findListOption(column, label)));
+    }
+    case "user":
+    case "todo_assignee":
+      return cell("user", listValue(column, value));
+    case "date":
+    case "todo_due_date": {
+      const dates = listValue(column, value);
+      const bad = dates.find((date) => !DATE.test(date));
+      if (bad !== undefined) {
+        throw new Error(`Column "${column.name}" needs dates as YYYY-MM-DD, got "${bad}".`);
+      }
+      return cell("date", dates);
+    }
+    case "email":
+    case "phone":
+    case "channel":
+      return cell(column.type, listValue(column, value));
+    case "number":
+    case "rating":
+      return cell(column.type, numberValue(column, value));
+    case "checkbox":
+    case "todo_completed":
+      if (typeof value !== "boolean") throw new Error(`Column "${column.name}" needs true or false.`);
+      return cell("checkbox", value);
+    default:
+      throw new Error(`Column "${column.name}" has type ${column.type}, which this tool can't write.`);
+  }
+}
+
 export const listTools = (tool: ToolFactory) => [
   tool({
     name: "slack_list_create",
@@ -254,4 +341,155 @@ export const listTools = (tool: ToolFactory) => [
       return { listId, ...(await fetchListSchema(listId, config, context)) };
     },
   }),
+  tool({
+    name: "slack_list_item_create",
+    label: "Create Slack list item",
+    description:
+      "Add an item (row) to a Slack List, filling cells by column name. Set parentItemId to add it as a subtask of an existing item. Returns the new item ID.",
+    parameters: Type.Object({
+      listId: Type.String({ description: "List ID, e.g. F0123ABCD." }),
+      fields: Type.Optional(
+        Type.Record(Type.String(), cellValueParam, {
+          description:
+            "Initial cell values keyed by column name (or column ID/key), e.g. {\"Task\":\"Write docs\",\"Status\":\"In progress\",\"Owner\":\"U0123ABCD\"}.",
+        }),
+      ),
+      parentItemId: Type.Optional(
+        Type.String({ description: "Item ID to nest this item under as a subtask, e.g. Rec0123ABCD." }),
+      ),
+    }),
+    outputSchema: Type.Object(
+      { listId: Type.String(), itemId: Type.String(), parentItemId: Type.Optional(Type.String()) },
+      { additionalProperties: false },
+    ),
+    async execute({ listId, fields, parentItemId }, config, context) {
+      context.signal?.throwIfAborted();
+      const body: Record<string, unknown> = { list_id: listId };
+      if (parentItemId) body.parent_item_id = parentItemId;
+      const entries = Object.entries(fields ?? {});
+      if (entries.length > 0) {
+        const { columns } = await fetchListSchema(listId, config, context);
+        body.initial_fields = entries.map(([name, value]) =>
+          encodeListCell(findListColumn(columns, name), value),
+        );
+      }
+      const data = await callSlack("slackLists.items.create", resolveToken(config), body, context);
+      const item = (data.item ?? {}) as { id?: unknown };
+      return {
+        listId,
+        itemId: String(item.id ?? ""),
+        ...(parentItemId ? { parentItemId } : {}),
+      };
+    },
+  }),
+  tool({
+    name: "slack_list_item_update",
+    label: "Update Slack list items",
+    description:
+      "Set cells on existing Slack List items in one batch. Each cell names its item (rowId), its column by name, and the new value; select values take option labels.",
+    parameters: Type.Object({
+      listId: Type.String({ description: "List ID, e.g. F0123ABCD." }),
+      cells: Type.Array(
+        Type.Object(
+          {
+            rowId: Type.String({ description: "Item ID to change, e.g. Rec0123ABCD." }),
+            column: Type.String({ description: "Column name (or column ID/key), e.g. \"Status\"." }),
+            value: cellValueParam,
+          },
+          { additionalProperties: false },
+        ),
+        { minItems: 1, description: "Cells to write. They can span several items." },
+      ),
+    }),
+    outputSchema: Type.Object(
+      { listId: Type.String(), updated: Type.Integer() },
+      { additionalProperties: false },
+    ),
+    async execute({ listId, cells }, config, context) {
+      context.signal?.throwIfAborted();
+      const { columns } = await fetchListSchema(listId, config, context);
+      const encoded = cells.map(({ rowId, column, value }) => ({
+        row_id: rowId,
+        ...encodeListCell(findListColumn(columns, column), value),
+      }));
+      await callSlack(
+        "slackLists.items.update",
+        resolveToken(config),
+        { list_id: listId, cells: encoded },
+        context,
+      );
+      return { listId, updated: encoded.length };
+    },
+  }),
+  tool({
+    name: "slack_list_item_delete",
+    label: "Delete Slack list item",
+    description: "Delete one item from a Slack List. This cannot be undone.",
+    parameters: Type.Object({
+      listId: Type.String({ description: "List ID, e.g. F0123ABCD." }),
+      itemId: Type.String({ description: "Item ID to delete, e.g. Rec0123ABCD." }),
+    }),
+    outputSchema: Type.Object(
+      { listId: Type.String(), itemId: Type.String(), deleted: Type.Literal(true) },
+      { additionalProperties: false },
+    ),
+    async execute({ listId, itemId }, config, context) {
+      context.signal?.throwIfAborted();
+      await callSlack(
+        "slackLists.items.delete",
+        resolveToken(config),
+        { list_id: listId, id: itemId },
+        context,
+      );
+      return { listId, itemId, deleted: true as const };
+    },
+  }),
+  tool({
+    name: "slack_list_items_delete_multiple",
+    label: "Delete Slack list items",
+    description: "Delete several items from a Slack List in one call. This cannot be undone.",
+    parameters: Type.Object({
+      listId: Type.String({ description: "List ID, e.g. F0123ABCD." }),
+      itemIds: Type.Array(Type.String(), {
+        minItems: 1,
+        description: "Item IDs to delete, e.g. [\"Rec0123ABCD\"].",
+      }),
+    }),
+    outputSchema: Type.Object(
+      { listId: Type.String(), itemIds: Type.Array(Type.String()), deleted: Type.Integer() },
+      { additionalProperties: false },
+    ),
+    async execute({ listId, itemIds }, config, context) {
+      context.signal?.throwIfAborted();
+      await callSlack(
+        "slackLists.items.deleteMultiple",
+        resolveToken(config),
+        { list_id: listId, ids: itemIds },
+        context,
+      );
+      return { listId, itemIds, deleted: itemIds.length };
+    },
+  }),
+];
+
+export const listApprovals: ApprovalRule[] = [
+  {
+    toolName: "slack_list_item_delete",
+    check: ({ listId, itemId }) => ({
+      title: "Delete Slack list item",
+      description: `Delete item ${itemId} from list ${listId}. This cannot be undone.`,
+      target: `list ${listId}`,
+    }),
+  },
+  {
+    toolName: "slack_list_items_delete_multiple",
+    check: ({ listId, itemIds }) => {
+      const ids = Array.isArray(itemIds) ? itemIds : [];
+      return {
+        title: "Delete Slack list items",
+        description: `Delete ${ids.length} item(s) (${ids.join(", ")}) from list ${listId}. This cannot be undone.`,
+        target: `list ${listId}`,
+      };
+    },
+  },
 ];

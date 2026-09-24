@@ -8,6 +8,9 @@ metadata: { "openclaw": { "emoji": "📋" } }
 
 A List is a table in Slack with typed columns. Create one with `slack_list_create`,
 then read its column and option IDs with `slack_list_schema` before writing to it.
+`slack_list_item_create` and `slack_list_item_update` accept column names and option
+labels directly and resolve them for you. `slack_list_schema` is for seeing what
+columns and options exist.
 
 ## The schema is fixed once the list exists
 

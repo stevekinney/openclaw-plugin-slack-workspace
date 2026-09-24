@@ -53,4 +53,9 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
   slack_channel_kickoff: write,
   slack_list_create: write,
   slack_list_schema: read,
+  slack_list_item_create: write,
+  // Sets each cell to a fixed value; repeating it lands the same result.
+  slack_list_item_update: idempotentWrite,
+  slack_list_item_delete: write,
+  slack_list_items_delete_multiple: write,
 };
