@@ -1,23 +1,174 @@
 # Slack Workspace
 
-OpenClaw plugin that registers Slack workspace tools and hooks with `definePluginEntry`.
+An OpenClaw plugin that gives the agent Slack workspace tools the bundled Slack channel plugin doesn't have: scheduling, search, structured messages, canvases, bookmarks, public-channel management, Slack Lists, file uploads, and more. It registers its tools and hooks with `definePluginEntry`. The channel plugin still handles conversation itself (replies, reactions, pins, and file handling inside a chat turn), so nothing here duplicates it.
 
-## Build
+## Tools
 
-```bash
-npm install
-npm run plugin:build
-npm run plugin:validate
-npm test
+Every tool uses the bot token except `slack_search`, which needs the user token; `slack_identity`, which checks whichever token you ask about; and `slack_workflow_trigger_run`, which uses no Slack token at all. The scopes listed are the ones Slack's docs require for the methods each tool calls. `openclaw slack-workspace doctor` checks them against what your tokens actually hold (see [Scope doctor](#scope-doctor)).
+
+Tools marked † take an optional `channelId`. Inside a Slack conversation, leaving it out targets the current channel. Outside one (cron jobs, automations, other chat platforms), it's required.
+
+### Identity and search
+
+| Tool | What it does | Token | Scopes |
+|---|---|---|---|
+| `slack_identity` | Report who a token authenticates as and which scopes it holds | bot or user (`tokenKind`) | none |
+| `slack_search` | Search messages or files as the authorizing user, including their private channels and DMs | **user** | `search:read` |
+
+### Messages and Block Kit
+
+| Tool | What it does | Token | Scopes |
+|---|---|---|---|
+| `slack_post_table` † | Post rows and columns as a native table | bot | `chat:write` |
+| `slack_post_plan` † | Post a checklist or progress card | bot | `chat:write` |
+| `slack_post_chart` † | Post a native chart | bot | `chat:write` |
+| `slack_post_rich_text` † | Post prose with real lists, quotes, and code blocks | bot | `chat:write` |
+| `slack_blocks_send` † | Post raw Block Kit blocks | bot | `chat:write` |
+| `slack_blocks_update` † | Replace an existing message's blocks by `ts` | bot | `chat:write` |
+| `slack_message_get` † | Find messages by the metadata stamped on them and return their `ts` | bot | `channels:history`, `metadata.message:read` |
+| `slack_post_ephemeral` † | Send one user a message only they can see | bot | `chat:write` |
+
+`slack_post_table`, `slack_post_plan`, `slack_post_chart`, and `slack_post_rich_text` also take `updateTs` to rewrite a message they posted earlier.
+
+### Scheduling and reminders
+
+| Tool | What it does | Token | Scopes |
+|---|---|---|---|
+| `slack_schedule_message` | Schedule a message up to 120 days out | bot | `chat:write` |
+| `slack_schedule_reschedule` | Replace a pending scheduled message's text or time | bot | `chat:write` |
+| `slack_remind` | Remind a person (by DM) or a channel at a set time | bot | `im:write`, `chat:write` |
+| `slack_scheduled_list` | List pending scheduled messages | bot | none |
+| `slack_scheduled_cancel` | Cancel a pending scheduled message | bot | `chat:write` |
+
+### Canvases
+
+| Tool | What it does | Token | Scopes |
+|---|---|---|---|
+| `slack_canvas_create` | Create a canvas from Markdown or a built-in template | bot | `canvases:write` |
+| `slack_canvas_edit` | Append, prepend, insert, replace, or delete canvas content, or rename the canvas | bot | `canvases:write` |
+| `slack_canvas_sections` | Find section IDs to edit relative to | bot | `canvases:read` |
+| `slack_canvas_list` | Find canvases the bot can see | bot | `files:read` |
+| `slack_canvas_access_set` | Share a canvas with channels or users | bot | `canvases:write` |
+| `slack_canvas_access_delete` | Revoke canvas access | bot | `canvases:write` |
+| `slack_canvas_delete` | Delete a canvas | bot | `canvases:write` |
+| `slack_canvas_channel_get_or_create` | Get or create a channel's tab canvas | bot | `channels:read`, `canvases:write` |
+| `slack_canvas_status_update` | Rewrite one section under a heading, for scheduled status runs | bot | `channels:read`, `canvases:read`, `canvases:write` |
+| `slack_canvas_from_thread` | Turn a thread into a canvas | bot | `channels:history`, `canvases:write` |
+
+### Bookmarks
+
+| Tool | What it does | Token | Scopes |
+|---|---|---|---|
+| `slack_bookmark_list` | List a channel's bookmarks | bot | `bookmarks:read` |
+| `slack_bookmark_add` | Add a link bookmark | bot | `bookmarks:write` |
+| `slack_bookmark_edit` | Change a bookmark's title, link, or emoji | bot | `bookmarks:write` |
+| `slack_bookmark_remove` | Remove a bookmark | bot | `bookmarks:write` |
+
+### Public channels
+
+| Tool | What it does | Token | Scopes |
+|---|---|---|---|
+| `slack_channel_create` | Create a public channel | bot | `channels:manage` |
+| `slack_channel_archive` | Archive a public channel | bot | `channels:read`, `channels:manage` |
+| `slack_channel_rename` | Rename a public channel | bot | `channels:read`, `channels:manage` |
+| `slack_channel_set_topic` | Set a channel's topic | bot | `channels:read`, `channels:write.topic` |
+| `slack_channel_set_purpose` | Set a channel's purpose | bot | `channels:read`, `channels:manage` |
+| `slack_channel_invite` | Invite users to a channel | bot | `channels:read`, `channels:write.invites` |
+| `slack_channel_join` | Join a public channel as the bot | bot | `channels:read`, `channels:join` |
+| `slack_channel_leave` | Leave a public channel | bot | `channels:read`, `channels:manage` |
+| `slack_channel_kickoff` | Create a project channel with topic, purpose, invites, canvas, and bookmark in one call | bot | `channels:manage`, `channels:write.topic`, `channels:write.invites`, `canvases:write`, `bookmarks:write` |
+
+### Slack Lists
+
+| Tool | What it does | Token | Scopes |
+|---|---|---|---|
+| `slack_list_create` | Create a List with typed columns | bot | `lists:write` |
+| `slack_list_schema` | Read a List's column and option IDs | bot | `lists:read` |
+| `slack_list_item_create` | Add a row, by column name | bot | `lists:read`, `lists:write` |
+| `slack_list_item_update` | Change cells, by column name | bot | `lists:read`, `lists:write` |
+| `slack_list_item_delete` | Delete a row | bot | `lists:write` |
+| `slack_list_items_delete_multiple` | Delete several rows | bot | `lists:write` |
+| `slack_list_items_list` | Read a List's rows | bot | `lists:read` |
+| `slack_list_item_info` | Read one row and its subtasks | bot | `lists:read` |
+| `slack_list_access_set` | Share a List with channels or users | bot | `lists:write` |
+| `slack_list_access_delete` | Revoke List access | bot | `lists:write` |
+| `slack_list_from_thread` | Turn a thread's action items into List rows | bot | `channels:history`, `lists:read`, `lists:write` |
+
+### Files
+
+| Tool | What it does | Token | Scopes |
+|---|---|---|---|
+| `slack_file_upload` | Upload a generated file, shared to a channel or kept private | bot | `files:write` |
+| `slack_remote_file_add` | Register an external document as a Slack file | bot | `remote_files:write` |
+| `slack_remote_file_update` | Update a remote file's details | bot | `remote_files:write` |
+| `slack_remote_file_remove` | Remove a remote file from Slack | bot | `remote_files:write` |
+| `slack_remote_file_share` | Share a remote file into channels | bot | `remote_files:share` |
+
+### Assistant threads, user groups, and workflows
+
+| Tool | What it does | Token | Scopes |
+|---|---|---|---|
+| `slack_assistant_set_title` | Rename an Agent View or Assistant View thread | bot | `assistant:write` |
+| `slack_assistant_suggest_prompts` | Show up to four suggested prompts under an assistant thread | bot | `assistant:write` |
+| `slack_usergroup_list` | List user groups (read-only) | bot | `usergroups:read` |
+| `slack_usergroup_members` | List a user group's members (read-only) | bot | `usergroups:read` |
+| `slack_workflow_trigger_run` | Start a Workflow Builder workflow through a configured webhook trigger | none | none |
+
+Tools that read a channel's history (`slack_message_get`, `slack_canvas_from_thread`, `slack_list_from_thread`) need the history scope for the conversation's type: `channels:history` for public channels, `groups:history` for private ones, and `im:history` or `mpim:history` for DMs and group DMs.
+
+## Configuration
+
+Configure the plugin under `plugins.entries.slack-workspace.config` in your OpenClaw config:
+
+```json5
+{
+  plugins: {
+    entries: {
+      "slack-workspace": {
+        config: {
+          botToken: { source: "env", id: "SLACK_BOT_TOKEN" },
+          userToken: { source: "env", id: "SLACK_USER_TOKEN" },
+          workflowTriggers: {
+            standup: { source: "env", id: "STANDUP_TRIGGER_URL" },
+          },
+          autoJoin: true,
+          autoJoinDeny: ["C0123ABCD"],
+        },
+      },
+    },
+  },
+}
 ```
 
-## Manifest
+| Key | Type | What it's for |
+|---|---|---|
+| `botToken` | string or SecretRef | The `xoxb-` bot token. Every tool except `slack_search` and `slack_workflow_trigger_run` uses it, and `slack_identity` uses it by default. Falls back to `SLACK_BOT_TOKEN`. |
+| `userToken` | string or SecretRef | The `xoxp-` user token. Only `slack_search` needs it (and `slack_identity` with `tokenKind: "user"`), because Slack's `search.*` methods reject bot tokens. Falls back to `SLACK_USER_TOKEN`. Leave it out if you don't need search. |
+| `workflowTriggers` | map of name to string or SecretRef | Workflow Builder webhook trigger URLs for `slack_workflow_trigger_run`. See [Workflow triggers](#workflow-triggers). |
+| `autoJoin` | boolean, default `true` | Join a public channel and retry once when a bot-token call fails with `not_in_channel`. See [Channel membership](#channel-membership). |
+| `autoJoinDeny` | array of channel IDs | Channels the bot never auto-joins. |
 
-`openclaw.plugin.json` is hand-authored. `npm run plugin:build` refreshes only the fields OpenClaw derives from the entry (id, name, description, `configSchema`, `contracts.tools`) and keeps the rest. Everything else (`configContracts`, `skills`, `cliCommands`, `toolMetadata`) is maintained by hand; when you add a tool, add its `toolMetadata` entry to both the manifest and `src/tool-metadata.ts`, which a test compares against it.
+Each secret can be a plain string or a SecretRef (`{ source, provider?, id }`). Use a SecretRef. `botToken`, `userToken`, and every `workflowTriggers` entry are declared in `configContracts.secretInputs`, so the host resolves the reference before the plugin sees it. If a SecretRef reaches the plugin unresolved, the tool fails and tells you to run `openclaw secrets reload`. A token whose prefix doesn't match its slot, say an `xoxp-` token in `botToken`, logs a warning but still runs.
 
-## Output shaping
+## Slack scopes
 
-Every tool declares an `outputSchema`. When a tool returns data from Slack, the default is to curate it: map Slack's object down to the few fields the agent acts on, rename them to camelCase, and set `additionalProperties: false`. Curate whenever the raw object is large or noisy, or carries fields the agent has no use for, like ranks, audit user and team IDs, or icon URLs. `slack_search`, `slack_scheduled_list`, `slack_bookmark_list`, `slack_bookmark_add`, `slack_bookmark_edit`, `slack_canvas_sections`, `slack_canvas_list`, and `slack_usergroup_list` all work this way. Pass a Slack value through untouched only when it's small and every field is useful, or when its structure is the point, like search's `paging` object. When you do, say so in the schema description. The rule also lives next to the shared schemas in `src/schemas.ts`.
+The Slack app needs these scopes, split by token:
+
+**Bot token (`xoxb-`):** `assistant:write`, `bookmarks:read`, `bookmarks:write`, `canvases:read`, `canvases:write`, `channels:history`, `channels:join`, `channels:manage`, `channels:read`, `channels:write.invites`, `channels:write.topic`, `chat:write`, `files:read`, `files:write`, `im:write`, `lists:read`, `lists:write`, `metadata.message:read`, `remote_files:share`, `remote_files:write`, `usergroups:read`. Add `groups:history`, `im:history`, and `mpim:history` to read threads outside public channels.
+
+**User token (`xoxp-`):** `search:read`.
+
+Every channel-management tool works on public channels only. The private-channel twins (`groups:write`, `groups:write.topic`, `groups:write.invites`) aren't part of this set, and the tools refuse private channels with an error that names the missing scope. `channels:join` is still pending on the Slack app (roadmap O-12), so joins fail until it's granted.
+
+The source of truth is `TOOL_SCOPES` in `src/doctor.ts`. Run `openclaw slack-workspace doctor` after changing the Slack app to confirm the reinstall picked up every scope.
+
+## Skills
+
+The plugin ships three agent skills in `skills/`, which teach the agent when and how to reach for the tools:
+
+- [`skills/slack-block-kit`](skills/slack-block-kit/SKILL.md): picking between `slack_post_table`, `slack_post_plan`, `slack_post_chart`, `slack_post_rich_text`, and raw `slack_blocks_send`, with a Block Kit reference in [`references/block-kit.md`](skills/slack-block-kit/references/block-kit.md).
+- [`skills/slack-canvas`](skills/slack-canvas/SKILL.md): writing canvases, the built-in templates, and canvas Markdown.
+- [`skills/slack-lists`](skills/slack-lists/SKILL.md): designing a List's columns and writing rows.
 
 ## Approvals
 
@@ -101,7 +252,26 @@ Slack has no method to edit a scheduled message, so `slack_schedule_reschedule` 
 
 `openclaw slack-workspace doctor` calls the read-only `auth.test` once per configured token and compares the scopes Slack actually granted against what each tool needs. Missing scopes are listed with the tools they break. This catches a Slack app whose manifest gained scopes that were never reinstalled. Pass `--json` for machine-readable output. The command exits non-zero on any gap, unavailable token, or rejected token. The per-tool requirements live in `TOOL_SCOPES` in `src/doctor.ts`. When you add a tool, add its entry there; a test fails if one is missing.
 
-## CI
+## Development
+
+### Build
+
+```bash
+npm install
+npm run plugin:build
+npm run plugin:validate
+npm test
+```
+
+### Manifest
+
+`openclaw.plugin.json` is hand-authored. `npm run plugin:build` refreshes only the fields OpenClaw derives from the entry (id, name, description, `configSchema`, `contracts.tools`) and keeps the rest. Everything else (`configContracts`, `skills`, `cliCommands`, `toolMetadata`) is maintained by hand; when you add a tool, add its `toolMetadata` entry to both the manifest and `src/tool-metadata.ts`, which a test compares against it.
+
+### Output shaping
+
+Every tool declares an `outputSchema`. When a tool returns data from Slack, the default is to curate it: map Slack's object down to the few fields the agent acts on, rename them to camelCase, and set `additionalProperties: false`. Curate whenever the raw object is large or noisy, or carries fields the agent has no use for, like ranks, audit user and team IDs, or icon URLs. `slack_search`, `slack_scheduled_list`, `slack_bookmark_list`, `slack_bookmark_add`, `slack_bookmark_edit`, `slack_canvas_sections`, `slack_canvas_list`, and `slack_usergroup_list` all work this way. Pass a Slack value through untouched only when it's small and every field is useful, or when its structure is the point, like search's `paging` object. When you do, say so in the schema description. The rule also lives next to the shared schemas in `src/schemas.ts`.
+
+### CI
 
 `.github/workflows/ci.yml` runs on every push and pull request. It builds, checks that `openclaw.plugin.json` matches `openclaw plugins build` output, validates the plugin, and runs the tests. To run the same checks locally before you commit:
 
