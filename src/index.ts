@@ -15,7 +15,8 @@ const jsonSchema = (schema: TSchema) => schema as unknown as ToolPluginMetadata[
 
 const id = "slack-workspace";
 const name = "Slack Workspace";
-const description = "Create and edit Slack canvases and manage channel bookmarks.";
+const description =
+  "Slack workspace tools: identity and message scheduling, search, structured messaging (tables, plans, charts), raw Block Kit messages, canvases, and channel bookmarks.";
 const pluginConfigSchema = buildJsonPluginConfigSchema(jsonSchema(configSchema));
 
 const entry = definePluginEntry({
