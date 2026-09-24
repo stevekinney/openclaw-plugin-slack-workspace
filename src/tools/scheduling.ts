@@ -71,6 +71,20 @@ export const schedulingTools = (tool: ToolFactory) => [
     parameters: Type.Object({
       channelId: Type.Optional(channelIdParam("Limit to this channel; omit for all channels.")),
     }),
+    outputSchema: Type.Object(
+      {
+        scheduled: Type.Array(
+          Type.Object({
+            id: Type.String(),
+            channelId: Type.String(),
+            postAt: Type.Number(),
+            postAtIso: Type.String(),
+            text: Type.Optional(Type.String()),
+          }),
+        ),
+      },
+      { additionalProperties: false },
+    ),
     async execute({ channelId }, config, context) {
       context.signal?.throwIfAborted();
       const body: Record<string, unknown> = {};
@@ -102,6 +116,14 @@ export const schedulingTools = (tool: ToolFactory) => [
       channelId: channelIdParam("The channel the message was scheduled into."),
       scheduledMessageId: Type.String({ description: "ID from slack_scheduled_list." }),
     }),
+    outputSchema: Type.Object(
+      {
+        channelId: Type.String(),
+        scheduledMessageId: Type.String(),
+        cancelled: Type.Literal(true),
+      },
+      { additionalProperties: false },
+    ),
     async execute({ channelId, scheduledMessageId }, config, context) {
       context.signal?.throwIfAborted();
       await callSlack(

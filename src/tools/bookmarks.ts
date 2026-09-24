@@ -2,6 +2,9 @@ import { Type } from "typebox";
 import { callSlack, resolveToken } from "../client.js";
 import { channelIdParam, type ToolFactory } from "../schemas.js";
 
+/** Slack's bookmark object, passed through as-is (id, title, link, emoji, ...). */
+const slackBookmark = Type.Record(Type.String(), Type.Unknown());
+
 export const bookmarkTools = (tool: ToolFactory) => [
   tool({
     name: "slack_bookmark_list",
@@ -10,6 +13,10 @@ export const bookmarkTools = (tool: ToolFactory) => [
     parameters: Type.Object({
       channelId: channelIdParam(),
     }),
+    outputSchema: Type.Object(
+      { bookmarks: Type.Array(slackBookmark) },
+      { additionalProperties: false },
+    ),
     async execute({ channelId }, config, context) {
       context.signal?.throwIfAborted();
       const token = resolveToken(config);
@@ -33,6 +40,10 @@ export const bookmarkTools = (tool: ToolFactory) => [
       link: Type.String({ description: "Bookmark URL." }),
       emoji: Type.Optional(Type.String({ description: "Emoji shortcode, e.g. :books:." })),
     }),
+    outputSchema: Type.Object(
+      { bookmark: Type.Union([slackBookmark, Type.Null()]) },
+      { additionalProperties: false },
+    ),
     async execute({ channelId, title, link, emoji }, config, context) {
       context.signal?.throwIfAborted();
       const token = resolveToken(config);
@@ -56,6 +67,10 @@ export const bookmarkTools = (tool: ToolFactory) => [
       channelId: channelIdParam(),
       bookmarkId: Type.String({ description: "Bookmark ID from slack_bookmark_list." }),
     }),
+    outputSchema: Type.Object(
+      { removed: Type.Literal(true), bookmarkId: Type.String() },
+      { additionalProperties: false },
+    ),
     async execute({ channelId, bookmarkId }, config, context) {
       context.signal?.throwIfAborted();
       const token = resolveToken(config);

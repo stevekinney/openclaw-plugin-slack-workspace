@@ -4,6 +4,7 @@
 // handing config to the plugin. Without it, a SecretRef config value fails schema
 // validation with "must be string". Re-apply it after every build.
 import { readFile, writeFile } from "node:fs/promises";
+import { TOOL_METADATA } from "../dist/tool-metadata.js";
 
 const MANIFEST = new URL("../openclaw.plugin.json", import.meta.url);
 const SECRET_PATHS = ["botToken", "userToken"];
@@ -18,5 +19,12 @@ manifest.configContracts = {
 // Bundled skills are also dropped by the generator. The value is a directory whose
 // immediate children each hold a SKILL.md.
 manifest.skills = ["./skills"];
+// `tool()` cannot declare sideEffecting/replaySafe/profiles, so merge them per tool.
+manifest.toolMetadata = Object.fromEntries(
+  Object.entries(TOOL_METADATA).map(([name, metadata]) => [
+    name,
+    { ...manifest.toolMetadata?.[name], ...metadata },
+  ]),
+);
 await writeFile(MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`);
-console.log(`patched configContracts.secretInputs: ${SECRET_PATHS.join(", ")}; skills: ./skills`);
+console.log(`patched configContracts.secretInputs: ${SECRET_PATHS.join(", ")}; skills: ./skills; toolMetadata: ${Object.keys(TOOL_METADATA).length} tools`);

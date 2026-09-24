@@ -1,0 +1,37 @@
+/**
+ * Manifest `toolMetadata` for every tool. `defineToolPlugin`'s `tool()` only emits
+ * `outputSchema` and `optional`, so `scripts/patch-manifest.mjs` merges these into
+ * `openclaw.plugin.json` after each build.
+ *
+ * `sideEffecting`: the call can change Slack state, so failed attempts must stay visible.
+ * `replaySafe`: repeating the call after an incomplete model turn does no harm.
+ */
+type ToolMetadata = {
+  sideEffecting: boolean;
+  replaySafe: boolean;
+  profiles: ["messaging"];
+};
+
+const read: ToolMetadata = { sideEffecting: false, replaySafe: true, profiles: ["messaging"] };
+const write: ToolMetadata = { sideEffecting: true, replaySafe: false, profiles: ["messaging"] };
+/** Rewrites a message to a fixed state; repeating it lands the same result. */
+const idempotentWrite: ToolMetadata = { ...write, replaySafe: true };
+
+export const TOOL_METADATA: Record<string, ToolMetadata> = {
+  slack_identity: read,
+  slack_search: read,
+  slack_schedule_message: write,
+  slack_scheduled_list: read,
+  slack_scheduled_cancel: write,
+  slack_post_table: write,
+  slack_post_plan: write,
+  slack_post_chart: write,
+  slack_blocks_send: write,
+  slack_blocks_update: idempotentWrite,
+  slack_canvas_create: write,
+  slack_canvas_edit: write,
+  slack_canvas_sections: read,
+  slack_bookmark_list: read,
+  slack_bookmark_add: write,
+  slack_bookmark_remove: write,
+};
