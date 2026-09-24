@@ -1,0 +1,174 @@
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
+import { authTest, resolveToken, type PluginConfig, type SlackCallContext } from "./client.js";
+
+type TokenKind = "bot" | "user";
+
+/**
+ * The token each tool calls Slack with and the OAuth scopes its methods need, per
+ * docs.slack.dev. A test keeps this map in step with the registered tools.
+ */
+export const TOOL_SCOPES: Record<string, { token: TokenKind; scopes: string[] }> = {
+  // auth.test needs no scope.
+  slack_identity: { token: "bot", scopes: [] },
+  slack_search: { token: "user", scopes: ["search:read"] },
+  slack_schedule_message: { token: "bot", scopes: ["chat:write"] },
+  // chat.scheduledMessages.list needs no scope.
+  slack_scheduled_list: { token: "bot", scopes: [] },
+  slack_scheduled_cancel: { token: "bot", scopes: ["chat:write"] },
+  slack_post_table: { token: "bot", scopes: ["chat:write"] },
+  slack_post_plan: { token: "bot", scopes: ["chat:write"] },
+  slack_post_chart: { token: "bot", scopes: ["chat:write"] },
+  slack_blocks_send: { token: "bot", scopes: ["chat:write"] },
+  slack_blocks_update: { token: "bot", scopes: ["chat:write"] },
+  slack_canvas_create: { token: "bot", scopes: ["canvases:write"] },
+  slack_canvas_edit: { token: "bot", scopes: ["canvases:write"] },
+  slack_canvas_sections: { token: "bot", scopes: ["canvases:read"] },
+  slack_bookmark_list: { token: "bot", scopes: ["bookmarks:read"] },
+  slack_bookmark_add: { token: "bot", scopes: ["bookmarks:write"] },
+  slack_bookmark_remove: { token: "bot", scopes: ["bookmarks:write"] },
+};
+
+export type TokenAudit = {
+  kind: TokenKind;
+  /** `unavailable`: no usable token configured. `error`: Slack rejected `auth.test`. */
+  status: "ok" | "missing_scopes" | "unavailable" | "error";
+  error?: string;
+  team: string | null;
+  identity: string | null;
+  granted: string[];
+  required: string[];
+  missing: string[];
+  /** Tools that will fail with `missing_scope`, and which of their scopes are absent. */
+  affectedTools: { tool: string; missing: string[] }[];
+};
+
+export type DoctorReport = { ok: boolean; tokens: TokenAudit[] };
+
+async function auditToken(
+  config: PluginConfig,
+  kind: TokenKind,
+  context?: SlackCallContext,
+): Promise<TokenAudit> {
+  const tools = Object.entries(TOOL_SCOPES).filter(([, needs]) => needs.token === kind);
+  const required = [...new Set(tools.flatMap(([, needs]) => needs.scopes))].sort();
+  const base = { kind, team: null, identity: null, granted: [], required, missing: required };
+  const affectedTools = (granted: Set<string>) =>
+    tools.flatMap(([tool, needs]) => {
+      const missing = needs.scopes.filter((scope) => !granted.has(scope));
+      return missing.length ? [{ tool, missing }] : [];
+    });
+
+  let token: string;
+  try {
+    token = resolveToken(config, kind);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ...base,
+      status: "unavailable",
+      error: message,
+      affectedTools: affectedTools(new Set()),
+    };
+  }
+
+  try {
+    const { data, scopes } = await authTest(token, context);
+    const granted = new Set(scopes);
+    const missing = required.filter((scope) => !granted.has(scope));
+    return {
+      ...base,
+      status: missing.length ? "missing_scopes" : "ok",
+      team: typeof data.team === "string" ? data.team : null,
+      identity: typeof data.user === "string" ? data.user : null,
+      granted: scopes,
+      missing,
+      affectedTools: affectedTools(granted),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ...base, status: "error", error: message, affectedTools: affectedTools(new Set()) };
+  }
+}
+
+/**
+ * Diff each configured token's granted scopes (from the read-only `auth.test`) against
+ * what this plugin's tools need. Catches an app whose manifest gained scopes but was
+ * never reinstalled, before a tool call fails mid-task.
+ */
+export async function auditScopes(
+  config: PluginConfig,
+  context?: SlackCallContext,
+): Promise<DoctorReport> {
+  const tokens = [
+    await auditToken(config, "bot", context),
+    await auditToken(config, "user", context),
+  ];
+  return { ok: tokens.every((token) => token.status === "ok"), tokens };
+}
+
+const list = (scopes: string[]) => (scopes.length ? scopes.join(", ") : "(none)");
+
+/** Human-readable doctor output. Never includes token values. */
+export function formatDoctorReport(report: DoctorReport): string {
+  const lines = ["slack-workspace doctor", ""];
+  for (const token of report.tokens) {
+    const label = token.kind === "bot" ? "Bot token" : "User token";
+    const who = token.team ? ` — ${token.identity ?? "unknown"} in ${token.team}` : "";
+    lines.push(`${label}${who}`);
+    if (token.error)
+      lines.push(`  ${token.status === "error" ? "ERROR" : "UNAVAILABLE"}: ${token.error}`);
+    else lines.push(`  Granted:  ${list(token.granted)}`);
+    lines.push(`  Required: ${list(token.required)}`);
+    if (token.status === "ok") {
+      lines.push("  All required scopes granted.");
+    } else {
+      for (const scope of token.missing) {
+        const tools = token.affectedTools
+          .filter((entry) => entry.missing.includes(scope))
+          .map((entry) => entry.tool);
+        lines.push(`  MISSING ${scope} — needed by ${tools.join(", ")}`);
+      }
+    }
+    lines.push("");
+  }
+  lines.push(
+    report.ok
+      ? "OK: every tool has the scopes it needs."
+      : "Problems found. Configure any unavailable token; add missing scopes to the Slack app and reinstall it. Then re-run this check.",
+  );
+  return `${lines.join("\n")}\n`;
+}
+
+/**
+ * `openclaw slack-workspace doctor [--json]`. Exits non-zero when any token is missing
+ * a scope, is unavailable, or is rejected, so it can gate scripts.
+ */
+export function registerDoctorCli(api: OpenClawPluginApi): void {
+  const config = (api.pluginConfig ?? {}) as PluginConfig;
+  api.registerCli(
+    ({ program, logger }) => {
+      program
+        .command("slack-workspace")
+        .description("Slack Workspace plugin utilities")
+        .command("doctor")
+        .description("Compare the bot and user tokens' granted scopes against what each tool needs")
+        .option("--json", "Print the report as JSON")
+        .action(async (options: { json?: boolean }) => {
+          const report = await auditScopes(config, { api: { logger } });
+          process.stdout.write(
+            options.json ? `${JSON.stringify(report, null, 2)}\n` : formatDoctorReport(report),
+          );
+          if (!report.ok) process.exitCode = 1;
+        });
+    },
+    {
+      descriptors: [
+        {
+          name: "slack-workspace",
+          description: "Slack Workspace plugin utilities",
+          hasSubcommands: true,
+        },
+      ],
+    },
+  );
+}

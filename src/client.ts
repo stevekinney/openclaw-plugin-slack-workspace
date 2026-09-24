@@ -191,3 +191,14 @@ export async function callSlack(
 ): Promise<SlackResponse> {
   return (await callSlackRaw(method, token, body, context, form)).data;
 }
+
+/**
+ * Who a token authenticates as, plus the scopes Slack reports it was granted. Read-only:
+ * `auth.test` changes nothing, so it is safe for diagnostics like the doctor command.
+ */
+export function authTest(
+  token: string,
+  context?: SlackCallContext,
+): Promise<{ data: SlackResponse; scopes: string[] }> {
+  return callSlackRaw("auth.test", token, {}, context);
+}
