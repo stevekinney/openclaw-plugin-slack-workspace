@@ -100,25 +100,34 @@ export type RegisteredHook = {
   opts?: { matcher?: readonly string[]; priority?: number };
 };
 
+/** One `api.registerCli(...)` registration captured from the fake plugin API. */
+export type RegisteredCli = {
+  registrar: (ctx: Record<string, unknown>) => void | Promise<void>;
+  opts?: { commands?: readonly string[]; descriptors?: readonly Record<string, unknown>[] };
+};
+
 /**
- * Run the plugin's `register(api)` against a minimal fake API and return every tool
- * and hook it registered, in registration order.
+ * Run the plugin's `register(api)` against a minimal fake API and return every tool,
+ * hook, and CLI registrar it registered, in registration order.
  */
 export function registerPlugin(
   config: Record<string, unknown> = TEST_CONFIG,
   logger = recordingLogger(),
-): { tools: RegisteredTool[]; hooks: RegisteredHook[] } {
+): { tools: RegisteredTool[]; hooks: RegisteredHook[]; clis: RegisteredCli[] } {
   const tools: RegisteredTool[] = [];
   const hooks: RegisteredHook[] = [];
+  const clis: RegisteredCli[] = [];
   const api = {
     pluginConfig: config,
     logger,
     registerTool: (tool: RegisteredTool) => tools.push(tool),
     on: (hookName: string, handler: RegisteredHook["handler"], opts?: RegisteredHook["opts"]) =>
       hooks.push({ hookName, handler, opts }),
+    registerCli: (registrar: RegisteredCli["registrar"], opts?: RegisteredCli["opts"]) =>
+      clis.push({ registrar, opts }),
   };
   (entry as unknown as { register: (api: unknown) => void }).register(api);
-  return { tools, hooks };
+  return { tools, hooks, clis };
 }
 
 /**

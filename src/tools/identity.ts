@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { callSlackRaw, resolveToken } from "../client.js";
+import { authTest, resolveToken } from "../client.js";
 import type { ToolFactory } from "../schemas.js";
 
 export const identityTools = (tool: ToolFactory) => [
@@ -29,12 +29,7 @@ export const identityTools = (tool: ToolFactory) => [
     async execute({ tokenKind }, config, context) {
       context.signal?.throwIfAborted();
       const kind = tokenKind ?? "bot";
-      const { data, scopes } = await callSlackRaw(
-        "auth.test",
-        resolveToken(config, kind),
-        {},
-        context,
-      );
+      const { data, scopes } = await authTest(resolveToken(config, kind), context);
       return {
         tokenKind: kind,
         team: data.team ?? null,

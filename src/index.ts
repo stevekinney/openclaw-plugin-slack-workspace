@@ -4,6 +4,7 @@ import {
   type ToolPluginMetadata,
 } from "openclaw/plugin-sdk/tool-plugin";
 import type { TSchema } from "typebox";
+import { registerDoctorCli } from "./doctor.js";
 import { beforeToolCall } from "./hooks.js";
 import { configSchema } from "./schemas.js";
 import { registerTools } from "./tool.js";
@@ -26,6 +27,7 @@ const entry = definePluginEntry({
     registerTools(api, tools);
     const [first, ...rest] = tools.map((tool) => tool.name);
     api.on("before_tool_call", beforeToolCall, { matcher: [first, ...rest] });
+    registerDoctorCli(api);
   },
 });
 

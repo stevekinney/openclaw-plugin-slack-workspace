@@ -63,6 +63,13 @@
   "activation": {
     "onStartup": true
   },
+  "cliCommands": [
+    {
+      "name": "slack-workspace",
+      "description": "Slack Workspace plugin utilities",
+      "hasSubcommands": true
+    }
+  ],
   "configContracts": {
     "secretInputs": {
       "paths": [
