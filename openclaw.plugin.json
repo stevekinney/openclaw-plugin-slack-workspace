@@ -120,6 +120,7 @@
       "slack_canvas_access_delete",
       "slack_canvas_delete",
       "slack_canvas_channel_get_or_create",
+      "slack_canvas_status_update",
       "slack_canvas_from_thread",
       "slack_bookmark_list",
       "slack_bookmark_add",
@@ -249,6 +250,13 @@
       ]
     },
     "slack_canvas_channel_get_or_create": {
+      "sideEffecting": true,
+      "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_canvas_status_update": {
       "sideEffecting": true,
       "replaySafe": true,
       "profiles": [

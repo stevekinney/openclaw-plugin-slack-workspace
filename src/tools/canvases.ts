@@ -29,6 +29,26 @@ const SECTION_TYPES = [
   "blockquote",
 ] as const;
 
+type SectionType = (typeof SECTION_TYPES)[number];
+
+/**
+ * Section IDs matching `criteria` via `canvases.sections.lookup`. Slack returns only
+ * opaque IDs, not section text, so callers can't disambiguate matches after the fact.
+ */
+async function lookupSections(
+  token: string,
+  canvasId: string,
+  { sectionTypes, containsText }: { sectionTypes?: SectionType[]; containsText?: string },
+  context: SlackCallContext,
+) {
+  const criteria: Record<string, unknown> = {};
+  if (sectionTypes?.length) criteria.section_types = sectionTypes;
+  if (containsText) criteria.contains_text = containsText;
+  const data = await callSlack("canvases.sections.lookup", token, { canvas_id: canvasId, criteria }, context);
+  const sections = (data.sections ?? []) as { id?: unknown }[];
+  return sections.map((section) => String(section.id ?? ""));
+}
+
 /** Who a canvas access change applies to. Slack takes channels or users per call, never both. */
 type CanvasAccessTarget = { channelIds: string[] } | { userIds: string[] };
 
@@ -198,6 +218,89 @@ async function channelCanvasGetOrCreate(
     if (!raced) throw error;
     return { canvasId: raced, created: false };
   }
+}
+
+/** How `updateStatusSection` landed the section. */
+type StatusAction = "created_canvas" | "inserted" | "replaced";
+
+/**
+ * Keep one agent-owned section of a channel's canvas current, leaving the rest alone.
+ * The section is found by its heading text on every call, never by a remembered ID:
+ * Slack doesn't promise a section keeps its ID across other people's edits. A heading
+ * that matches more than one section is an error rather than a guess, since lookup
+ * returns only IDs and the wrong match would overwrite someone else's content.
+ */
+export async function updateStatusSection(
+  token: string,
+  {
+    channelId,
+    heading,
+    markdown,
+    headingLevel = "h2",
+    insertAfterHeading,
+    title,
+  }: {
+    channelId: string;
+    heading: string;
+    markdown: string;
+    headingLevel?: "h1" | "h2" | "h3";
+    insertAfterHeading?: string;
+    title?: string;
+  },
+  context: SlackCallContext,
+): Promise<{ canvasId: string; action: StatusAction; sectionId: string | null }> {
+  const text = heading.trim();
+  if (!text || /[\r\n]/.test(text)) throw new Error("heading must be a single line of text.");
+  const section = `${"#".repeat(Number(headingLevel.slice(1)))} ${text}\n\n${markdown.trim()}`;
+
+  const { canvasId, created } = await channelCanvasGetOrCreate(
+    token,
+    { channelId, title, markdown: section },
+    context,
+  );
+  if (created) return { canvasId, action: "created_canvas", sectionId: null };
+
+  const edit = (change: Record<string, unknown>) =>
+    callSlack(
+      "canvases.edit",
+      token,
+      {
+        canvas_id: canvasId,
+        changes: [{ ...change, document_content: { type: "markdown", markdown: section } }],
+      },
+      context,
+    );
+
+  const matches = await lookupSections(
+    token,
+    canvasId,
+    { sectionTypes: [headingLevel], containsText: text },
+    context,
+  );
+  if (matches.length > 1) {
+    throw new Error(
+      `Heading "${text}" matches ${matches.length} sections of canvas ${canvasId}; use a heading no other ${headingLevel} contains.`,
+    );
+  }
+  const [sectionId] = matches;
+  if (sectionId) {
+    await edit({ operation: "replace", section_id: sectionId });
+    return { canvasId, action: "replaced", sectionId };
+  }
+
+  // First run: place the section under an anchor heading if it's there, else at the end.
+  const [anchorId] = insertAfterHeading?.trim()
+    ? await lookupSections(
+        token,
+        canvasId,
+        { sectionTypes: ["any_header"], containsText: insertAfterHeading.trim() },
+        context,
+      )
+    : [];
+  await edit(
+    anchorId ? { operation: "insert_after", section_id: anchorId } : { operation: "insert_at_end" },
+  );
+  return { canvasId, action: "inserted", sectionId: null };
 }
 
 /** One thread message, curated to what a transcript needs. */
@@ -476,19 +579,14 @@ export const canvasTools = (tool: ToolFactory) => [
       if (!sectionTypes?.length && !containsText) {
         throw new Error("slack_canvas_sections needs sectionTypes or containsText.");
       }
-      const token = resolveToken(config);
-      const criteria: Record<string, unknown> = {};
-      if (sectionTypes?.length) criteria.section_types = sectionTypes;
-      if (containsText) criteria.contains_text = containsText;
-      const data = await callSlack(
-        "canvases.sections.lookup",
-        token,
-        { canvas_id: canvasId, criteria },
+      const ids = await lookupSections(
+        resolveToken(config),
+        canvasId,
+        { sectionTypes, containsText },
         context,
       );
       // Curated to the ID (see "Output shaping" in schemas.ts): it's all an edit needs.
-      const sections = (data.sections ?? []) as { id?: unknown }[];
-      return { sections: sections.map((section) => ({ id: String(section.id ?? "") })) };
+      return { sections: ids.map((id) => ({ id })) };
     },
   }),
 
@@ -603,6 +701,63 @@ export const canvasTools = (tool: ToolFactory) => [
       return { canvasId, channelId, created, url: await canvasUrl(token, canvasId, context) };
     },
   }),
+  tool({
+    name: "slack_canvas_status_update",
+    label: "Update Slack status canvas section",
+    description:
+      "Keep one section of a channel's canvas current, e.g. a status board a scheduled run refreshes. Finds the section by its heading text and replaces it (heading plus your markdown), leaving the rest of the canvas untouched; safe to repeat. If the section is missing it is inserted after insertAfterHeading or at the end; if the channel has no canvas, one is created holding just this section. Pick a heading no other heading of that level contains: an ambiguous heading is an error, not a guess.",
+    parameters: Type.Object({
+      channelId: Type.String({ description: CHANNEL_ID_DESCRIPTION }),
+      heading: Type.String({
+        minLength: 1,
+        description:
+          "Stable heading text that identifies the section, e.g. Build status. Keep it the same across runs.",
+      }),
+      markdown: Type.String({
+        description: "Section body as markdown, written below the heading. Replaces the previous body.",
+      }),
+      headingLevel: Type.Optional(
+        Type.Union([Type.Literal("h1"), Type.Literal("h2"), Type.Literal("h3")], {
+          description: "Heading level of the section. Default: h2.",
+        }),
+      ),
+      insertAfterHeading: Type.Optional(
+        Type.String({
+          description:
+            "When the section doesn't exist yet, insert it after the heading containing this text. Default: the end of the canvas.",
+        }),
+      ),
+      title: Type.Optional(
+        Type.String({ description: "Canvas title if the channel canvas is created. Ignored if it exists." }),
+      ),
+    }),
+    outputSchema: Type.Object(
+      {
+        canvasId: Type.String(),
+        channelId: Type.String(),
+        action: Type.Union(
+          [Type.Literal("created_canvas"), Type.Literal("inserted"), Type.Literal("replaced")],
+          { description: "created_canvas: made the channel canvas; inserted: added the section; replaced: rewrote it." },
+        ),
+        sectionId: Type.Union([Type.String(), Type.Null()], {
+          description: "The section replaced. Don't reuse it: the next run looks the section up again.",
+        }),
+        url: Type.Union([Type.String(), Type.Null()]),
+      },
+      { additionalProperties: false },
+    ),
+    async execute({ channelId, heading, markdown, headingLevel, insertAfterHeading, title }, config, context) {
+      context.signal?.throwIfAborted();
+      const token = resolveToken(config);
+      const result = await updateStatusSection(
+        token,
+        { channelId, heading, markdown, headingLevel, insertAfterHeading, title },
+        context,
+      );
+      return { ...result, channelId, url: await canvasUrl(token, result.canvasId, context) };
+    },
+  }),
+
   tool({
     name: "slack_canvas_from_thread",
     label: "Create Slack canvas from thread",
