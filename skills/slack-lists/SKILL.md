@@ -13,6 +13,8 @@ labels directly and resolve them for you. `slack_list_schema` is for seeing what
 columns and options exist.
 Read rows back with `slack_list_items_list` (pass `archived: true` for archived rows)
 or one row and its subtasks with `slack_list_item_info`.
+Share a list with `slack_list_access_set` (channels get read or write; users can also
+get owner) and take access away with `slack_list_access_delete`.
 
 ## The schema is fixed once the list exists
 
