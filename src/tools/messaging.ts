@@ -713,4 +713,45 @@ export const messagingTools = (tool: ToolFactory) => [
       return { messages, truncated: true };
     },
   }),
+
+  tool({
+    name: "slack_post_ephemeral",
+    label: "Post Slack ephemeral message",
+    description:
+      "Post a private message that only one user sees, inline in a shared channel or thread, without cluttering it for everyone else. Use for a personal nudge or a reminder aimed at one person. Ephemeral messages are temporary, can't be edited or found again later, and only reach a user who is a member of the channel.",
+    parameters: Type.Object({
+      channelId: channelIdParam("The channel the user will see the message in."),
+      userId: Type.String({
+        description: "The one user who sees the message, e.g. U0ALICE. Must be a member of the channel.",
+      }),
+      text: Type.String({
+        description:
+          "Message text, or the notification and screen-reader fallback when `blocks` is set.",
+      }),
+      blocks: Type.Optional(blocksSchema),
+      threadTs: threadTsParam,
+    }),
+    outputSchema: Type.Object(
+      {
+        channelId: Type.String(),
+        userId: Type.String(),
+        ephemeralTs: Type.String({
+          description:
+            "Slack's message_ts, for reference only. Ephemeral messages cannot be updated: don't pass this to slack_blocks_update or `updateTs`.",
+        }),
+      },
+      { additionalProperties: false },
+    ),
+    async execute({ channelId, userId, text, blocks, threadTs }, config, context) {
+      context.signal?.throwIfAborted();
+      const body: Record<string, unknown> = { channel: channelId, user: userId, text };
+      if (blocks) body.blocks = blocks;
+      if (threadTs) body.thread_ts = threadTs;
+      const data = await callSlack("chat.postEphemeral", resolveToken(config, "bot"), body, context);
+      if (typeof data.message_ts !== "string" || !data.message_ts) {
+        throw new Error("chat.postEphemeral succeeded but returned no message_ts.");
+      }
+      return { channelId, userId, ephemeralTs: data.message_ts };
+    },
+  }),
 ];

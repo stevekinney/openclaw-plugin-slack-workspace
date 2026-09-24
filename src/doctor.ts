@@ -23,6 +23,7 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind; scopes: string[] }>
   slack_blocks_update: { token: "bot", scopes: ["chat:write"] },
   // groups:/im:/mpim:history stand in for channels:history on private channels and DMs.
   slack_message_get: { token: "bot", scopes: ["channels:history", "metadata.message:read"] },
+  slack_post_ephemeral: { token: "bot", scopes: ["chat:write"] },
   slack_canvas_create: { token: "bot", scopes: ["canvases:write"] },
   slack_canvas_edit: { token: "bot", scopes: ["canvases:write"] },
   slack_canvas_sections: { token: "bot", scopes: ["canvases:read"] },
