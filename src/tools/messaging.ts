@@ -30,7 +30,7 @@ const truncated = (items: string[], limit: number, noun = "") =>
 /** Slack's aggregate limit on the text of every cell in a data_table. */
 const MAX_TABLE_CHARACTERS = 10_000;
 
-const plural =(count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
 /**
  * `text` is what notifications show and what search indexes for block-only
