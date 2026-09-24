@@ -15,6 +15,69 @@ async function canvasUrl(token: string, canvasId: string, context: SlackCallCont
   return workspace ? canvasPermalink(workspace, canvasId) : null;
 }
 
+/** What `createCanvas` returns. */
+export const createdCanvasSchema = Type.Object(
+  {
+    canvasId: Type.String(),
+    url: Type.Union([Type.String(), Type.Null()]),
+    sharedWith: Type.Union([Type.String(), Type.Null()]),
+    shareError: Type.Optional(Type.String()),
+  },
+  { additionalProperties: false },
+);
+
+/**
+ * Create a canvas and optionally share it to a channel. The canvas exists once create
+ * succeeds, so a share failure is reported, not thrown: the caller still needs the ID
+ * to retry sharing or clean it up. Shared by `slack_canvas_create` and `slack_channel_kickoff`.
+ */
+export async function createCanvas(
+  token: string,
+  {
+    title,
+    markdown,
+    channelId,
+    accessLevel,
+  }: { title: string; markdown: string; channelId?: string; accessLevel?: "read" | "write" },
+  context: SlackCallContext,
+) {
+  const created = await callSlack(
+    "canvases.create",
+    token,
+    {
+      title,
+      document_content: { type: "markdown", markdown },
+    },
+    context,
+  );
+  const canvasId = String(created.canvas_id ?? "");
+  let shareError: string | undefined;
+  if (channelId) {
+    try {
+      await callSlack(
+        "canvases.access.set",
+        token,
+        {
+          canvas_id: canvasId,
+          channel_ids: [channelId],
+          access_level: accessLevel ?? "write",
+        },
+        context,
+      );
+    } catch (error) {
+      // Cancellation isn't a share failure: honor it rather than returning a result.
+      context.signal?.throwIfAborted();
+      shareError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  return {
+    canvasId,
+    url: await canvasUrl(token, canvasId, context),
+    sharedWith: shareError === undefined ? (channelId ?? null) : null,
+    ...(shareError === undefined ? {} : { shareError }),
+  };
+}
+
 export const canvasTools = (tool: ToolFactory) => [
   tool({
     name: "slack_canvas_create",
@@ -33,55 +96,10 @@ export const canvasTools = (tool: ToolFactory) => [
         }),
       ),
     }),
-    outputSchema: Type.Object(
-      {
-        canvasId: Type.String(),
-        url: Type.Union([Type.String(), Type.Null()]),
-        sharedWith: Type.Union([Type.String(), Type.Null()]),
-        shareError: Type.Optional(Type.String()),
-      },
-      { additionalProperties: false },
-    ),
+    outputSchema: createdCanvasSchema,
     async execute({ title, markdown, channelId, accessLevel }, config, context) {
       context.signal?.throwIfAborted();
-      const token = resolveToken(config);
-      const created = await callSlack(
-        "canvases.create",
-        token,
-        {
-          title,
-          document_content: { type: "markdown", markdown },
-        },
-        context,
-      );
-      const canvasId = String(created.canvas_id ?? "");
-      // The canvas exists once create succeeds, so a share failure is reported, not
-      // thrown: the caller still needs the ID to retry sharing or clean it up.
-      let shareError: string | undefined;
-      if (channelId) {
-        try {
-          await callSlack(
-            "canvases.access.set",
-            token,
-            {
-              canvas_id: canvasId,
-              channel_ids: [channelId],
-              access_level: accessLevel ?? "write",
-            },
-            context,
-          );
-        } catch (error) {
-          // Cancellation isn't a share failure: honor it rather than returning a result.
-          context.signal?.throwIfAborted();
-          shareError = error instanceof Error ? error.message : String(error);
-        }
-      }
-      return {
-        canvasId,
-        url: await canvasUrl(token, canvasId, context),
-        sharedWith: shareError === undefined ? (channelId ?? null) : null,
-        ...(shareError === undefined ? {} : { shareError }),
-      };
+      return createCanvas(resolveToken(config), { title, markdown, channelId, accessLevel }, context);
     },
   }),
 

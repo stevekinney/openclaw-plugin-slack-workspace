@@ -24,8 +24,8 @@ const READ_ONLY = [
 ];
 
 describe("outputSchema", () => {
-  it("is declared by all 22 tools", () => {
-    expect(tools).toHaveLength(22);
+  it("is declared by all 23 tools", () => {
+    expect(tools).toHaveLength(23);
     for (const tool of tools) expect(tool.outputSchema, tool.name).toBeDefined();
   });
 });

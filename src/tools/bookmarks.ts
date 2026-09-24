@@ -1,10 +1,10 @@
 import { Type } from "typebox";
-import { callSlack, resolveToken } from "../client.js";
+import { callSlack, resolveToken, type SlackCallContext } from "../client.js";
 import type { ApprovalRule } from "../approvals.js";
 import { channelIdParam, type ToolFactory } from "../schemas.js";
 
 /** Curated bookmark (see "Output shaping" in schemas.ts): Slack's carries ~15 bookkeeping fields. */
-const slackBookmark = Type.Object(
+export const slackBookmark = Type.Object(
   {
     id: Type.String(),
     title: Type.String(),
@@ -26,6 +26,23 @@ function curateBookmark(raw: RawBookmark) {
     ...(typeof raw.emoji === "string" && raw.emoji ? { emoji: raw.emoji } : {}),
     type: String(raw.type ?? ""),
   };
+}
+
+/** Add a link bookmark. Shared by `slack_bookmark_add` and `slack_channel_kickoff`. */
+export async function addBookmark(
+  token: string,
+  { channelId, title, link, emoji }: { channelId: string; title: string; link: string; emoji?: string },
+  context: SlackCallContext,
+) {
+  const body: Record<string, unknown> = {
+    channel_id: channelId,
+    title,
+    type: "link",
+    link,
+  };
+  if (emoji) body.emoji = emoji;
+  const data = await callSlack("bookmarks.add", token, body, context);
+  return data.bookmark ? curateBookmark(data.bookmark as RawBookmark) : null;
 }
 
 export const bookmarkTools = (tool: ToolFactory) => [
@@ -69,16 +86,9 @@ export const bookmarkTools = (tool: ToolFactory) => [
     ),
     async execute({ channelId, title, link, emoji }, config, context) {
       context.signal?.throwIfAborted();
-      const token = resolveToken(config);
-      const body: Record<string, unknown> = {
-        channel_id: channelId,
-        title,
-        type: "link",
-        link,
+      return {
+        bookmark: await addBookmark(resolveToken(config), { channelId, title, link, emoji }, context),
       };
-      if (emoji) body.emoji = emoji;
-      const data = await callSlack("bookmarks.add", token, body, context);
-      return { bookmark: data.bookmark ? curateBookmark(data.bookmark as RawBookmark) : null };
     },
   }),
 

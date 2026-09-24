@@ -229,3 +229,161 @@ describe("channel approvals", () => {
     expect(approvalFor(name, params)).toBeUndefined();
   });
 });
+
+describe("slack_channel_kickoff", () => {
+  const NEW = { id: "C0NEW", name: "launch", is_private: false };
+  const full = {
+    name: "launch",
+    topic: "Ship it",
+    purpose: "Launch room",
+    invite: ["U0A", "U0B"],
+    canvas: { title: "Launch plan", markdown: "# Plan" },
+    bookmark: { title: "Tracker", link: "https://example.com/tracker", emoji: ":dart:" },
+  };
+
+  /** Answer each method with a success payload, or with `failures[method]` when set. */
+  const kickoffSlack =
+    (failures: Record<string, string> = {}) =>
+    ({ method }: RecordedCall) => {
+      if (failures[method]) return { ok: false, error: failures[method] };
+      switch (method) {
+        case "conversations.create":
+          return { ok: true, channel: NEW };
+        case "canvases.create":
+          return { ok: true, canvas_id: "F0CANVAS" };
+        case "auth.test":
+          return { ok: true, url: "https://lostgradient.slack.com/", team_id: "T0TEST" };
+        case "bookmarks.add":
+          return {
+            ok: true,
+            bookmark: { id: "Bk0NEW", title: "Tracker", link: full.bookmark.link, emoji: ":dart:", type: "link" },
+          };
+        default:
+          return { ok: true, channel: NEW };
+      }
+    };
+
+  it("stands up the room in order and reports every step", async () => {
+    await withMockFetch(kickoffSlack(), async (calls) => {
+      const result = (await runTool("slack_channel_kickoff", full)) as Record<string, any>;
+      expect(methods(calls).filter((method) => method !== "auth.test")).toEqual([
+        "conversations.create",
+        "conversations.setTopic",
+        "conversations.setPurpose",
+        "conversations.invite",
+        "canvases.create",
+        "canvases.access.set",
+        "bookmarks.add",
+      ]);
+      const body = (method: string) => calls.find((call) => call.method === method)!.body;
+      expect(body("conversations.create")).toEqual({ name: "launch", is_private: false });
+      expect(body("conversations.setTopic")).toEqual({ channel: "C0NEW", topic: "Ship it" });
+      expect(body("conversations.setPurpose")).toEqual({ channel: "C0NEW", purpose: "Launch room" });
+      expect(body("conversations.invite")).toEqual({ channel: "C0NEW", users: "U0A,U0B" });
+      expect(body("canvases.access.set")).toMatchObject({
+        canvas_id: "F0CANVAS",
+        channel_ids: ["C0NEW"],
+        access_level: "write",
+      });
+      expect(body("bookmarks.add")).toMatchObject({
+        channel_id: "C0NEW",
+        title: "Tracker",
+        link: full.bookmark.link,
+        emoji: ":dart:",
+      });
+      expect(result).toMatchObject({
+        channel: { id: "C0NEW", name: "launch" },
+        complete: true,
+        steps: [
+          { step: "create", ok: true },
+          { step: "topic", ok: true },
+          { step: "purpose", ok: true },
+          { step: "invite", ok: true },
+          { step: "canvas", ok: true },
+          { step: "bookmark", ok: true },
+        ],
+        invited: ["U0A", "U0B"],
+        canvas: { canvasId: "F0CANVAS", sharedWith: "C0NEW" },
+        bookmark: { id: "Bk0NEW", title: "Tracker" },
+      });
+      for (const step of result.steps) expect(step.error).toBeUndefined();
+    });
+  });
+
+  it("only runs the steps it was given", async () => {
+    await withMockFetch(kickoffSlack(), async (calls) => {
+      await expect(runTool("slack_channel_kickoff", { name: "launch" })).resolves.toEqual({
+        channel: { id: "C0NEW", name: "launch" },
+        complete: true,
+        steps: [{ step: "create", ok: true }],
+        invited: [],
+        canvas: null,
+        bookmark: null,
+      });
+      expect(methods(calls)).toEqual(["conversations.create"]);
+    });
+  });
+
+  it("keeps going after a failed step and reports it", async () => {
+    await withMockFetch(
+      kickoffSlack({ "conversations.invite": "user_not_found" }),
+      async (calls) => {
+        const result = (await runTool("slack_channel_kickoff", full)) as Record<string, any>;
+        expect(result.complete).toBe(false);
+        expect(result.steps).toEqual([
+          { step: "create", ok: true },
+          { step: "topic", ok: true },
+          { step: "purpose", ok: true },
+          {
+            step: "invite",
+            ok: false,
+            error: "Slack conversations.invite failed: user_not_found",
+          },
+          { step: "canvas", ok: true },
+          { step: "bookmark", ok: true },
+        ]);
+        expect(result.invited).toEqual([]);
+        expect(result.channel).toEqual({ id: "C0NEW", name: "launch" });
+        expect(methods(calls)).toContain("bookmarks.add");
+      },
+    );
+  });
+
+  it("reports a canvas that was created but not shared as a failed step, keeping its ID", async () => {
+    await withMockFetch(
+      kickoffSlack({ "canvases.access.set": "not_allowed" }),
+      async () => {
+        const result = (await runTool("slack_channel_kickoff", full)) as Record<string, any>;
+        expect(result.complete).toBe(false);
+        expect(result.steps[4]).toEqual({
+          step: "canvas",
+          ok: false,
+          error: "Slack canvases.access.set failed: not_allowed",
+        });
+        expect(result.canvas).toMatchObject({ canvasId: "F0CANVAS", sharedWith: null });
+      },
+    );
+  });
+
+  it("throws when the channel can't be created, since no later step can run", async () => {
+    await withMockFetch(kickoffSlack({ "conversations.create": "name_taken" }), async (calls) => {
+      await expect(runTool("slack_channel_kickoff", full)).rejects.toThrow(
+        "Slack conversations.create failed: name_taken",
+      );
+      expect(methods(calls)).toEqual(["conversations.create"]);
+    });
+  });
+
+  it("always asks a human first, listing what it will do", () => {
+    const approval = approvalFor("slack_channel_kickoff", full);
+    expect(approval).toMatchObject({
+      title: "Kick off Slack channel",
+      scope: { kind: "external-post", target: "new channel #launch" },
+      allowedDecisions: ["allow-once", "deny"],
+    });
+    for (const detail of ["#launch", "U0A", "Launch plan", "Tracker"]) {
+      expect(approval?.description).toContain(detail);
+    }
+    expect(approvalFor("slack_channel_kickoff", { name: "launch" })).toBeDefined();
+  });
+});

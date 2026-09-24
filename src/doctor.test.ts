@@ -81,6 +81,7 @@ describe("auditScopes", () => {
       expect(botAudit.affectedTools).toEqual([
         { tool: "slack_canvas_create", missing: ["canvases:write"] },
         { tool: "slack_canvas_edit", missing: ["canvases:write"] },
+        { tool: "slack_channel_kickoff", missing: ["canvases:write"] },
       ]);
       expect(userAudit).toMatchObject({ status: "missing_scopes", missing: ["search:read"] });
       expect(userAudit.affectedTools).toEqual([{ tool: "slack_search", missing: ["search:read"] }]);

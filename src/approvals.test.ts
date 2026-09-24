@@ -51,6 +51,7 @@ const gated: Array<[string, Record<string, unknown>, string]> = [
     { channelId: "C0TEST", name: "renamed", confirm: true },
     "conversations.rename",
   ],
+  ["slack_channel_kickoff", { name: "launch" }, "conversations.create"],
 ];
 
 describe("approval registry", () => {
@@ -59,6 +60,7 @@ describe("approval registry", () => {
       "slack_bookmark_remove",
       "slack_canvas_edit",
       "slack_channel_archive",
+      "slack_channel_kickoff",
       "slack_channel_rename",
       "slack_scheduled_cancel",
     ]);

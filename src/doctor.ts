@@ -33,6 +33,17 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind; scopes: string[] }>
   slack_channel_set_topic: { token: "bot", scopes: ["channels:read", "channels:write.topic"] },
   slack_channel_set_purpose: { token: "bot", scopes: ["channels:read", "channels:manage"] },
   slack_channel_invite: { token: "bot", scopes: ["channels:read", "channels:write.invites"] },
+  // Creates the channel itself, so it skips the conversations.info check.
+  slack_channel_kickoff: {
+    token: "bot",
+    scopes: [
+      "channels:manage",
+      "channels:write.topic",
+      "channels:write.invites",
+      "canvases:write",
+      "bookmarks:write",
+    ],
+  },
 };
 
 export type TokenAudit = {
