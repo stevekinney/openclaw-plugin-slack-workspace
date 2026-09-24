@@ -133,7 +133,7 @@ These unblock nearly everything else: a test harness, a hardened HTTP client,
 module boundaries, and consistent tool metadata. Build them first so every
 later task lands on top of them instead of duplicating the work per-tool.
 
-- [ ] **F-01: Add a CI gate for build, validate, and test** — Add a CI workflow (or documented local pre-commit script) that runs `npm run build`, `openclaw plugins build --check`, `openclaw plugins validate`, and `npm test` on every change, so a 16-tool, 900+-line plugin stops shipping unreviewed regressions.
+- [x] **F-01: Add a CI gate for build, validate, and test** — Add a CI workflow (or documented local pre-commit script) that runs `npm run build`, `openclaw plugins build --check`, `openclaw plugins validate`, and `npm test` on every change, so a 16-tool, 900+-line plugin stops shipping unreviewed regressions.
   - Why: there is currently no CI and no enforcement that the manifest, build, and tests stay in sync; `openclaw.plugin.json` already drifts from `src/index.ts` today (stale description).
   - Scope(s) & token type: none (repo tooling only).
   - API methods: none.
@@ -143,7 +143,7 @@ later task lands on top of them instead of duplicating the work per-tool.
   - Tests: CI config exercised by a deliberately-broken throwaway commit during implementation (reverted before merge).
   - Size: S
 
-- [ ] **F-02: Build a mocked-fetch test harness and cover existing execute() bodies** — Add a `withMockFetch`-style helper (following OpenClaw's `plugin-sdk` test-env conventions) and use it to cover the validation logic that currently has zero tests: row/column-width mismatch (`slack_post_table`), series/category mismatch (`slack_post_chart`), `postAt` bounds (past, >120 days), and the `missing_scope`/`not_allowed_token_type` error-hint text.
+- [x] **F-02: Build a mocked-fetch test harness and cover existing execute() bodies** — Add a `withMockFetch`-style helper (following OpenClaw's `plugin-sdk` test-env conventions) and use it to cover the validation logic that currently has zero tests: row/column-width mismatch (`slack_post_table`), series/category mismatch (`slack_post_chart`), `postAt` bounds (past, >120 days), and the `missing_scope`/`not_allowed_token_type` error-hint text.
   - Why: `src/index.test.ts` (26 lines) only asserts the static tool-name list; none of the 927 lines of execute()-body logic has a single behavioral test, and every task below that touches behavior needs somewhere to put its test.
   - Scope(s) & token type: none (test infra).
   - API methods: none (fetch is mocked).
@@ -153,7 +153,7 @@ later task lands on top of them instead of duplicating the work per-tool.
   - Tests: this task *is* the tests.
   - Size: M
 
-- [ ] **F-03: Harden the shared Slack HTTP client (response guard, 429 backoff, richer hints, logging)** — In `callSlackRaw` (`src/index.ts:41-86`), guard `response.json()` against non-JSON bodies, add bounded retry with `Retry-After` handling on HTTP 429/`ratelimited`, extend the error-hint table with `cant_update_message` and the canvas/list error codes found during research (`free_teams_cannot_create_standalone_canvases`, `channel_canvas_already_exists`, `canvas_too_large`, `canvas_editing_locked`, `invalid_primary_column`, `over_column_maximum`), and add call-level logging (method, elapsed time, ok/error outcome — never tokens or full bodies).
+- [x] **F-03: Harden the shared Slack HTTP client (response guard, 429 backoff, richer hints, logging)** — In `callSlackRaw` (`src/index.ts:41-86`), guard `response.json()` against non-JSON bodies, add bounded retry with `Retry-After` handling on HTTP 429/`ratelimited`, extend the error-hint table with `cant_update_message` and the canvas/list error codes found during research (`free_teams_cannot_create_standalone_canvases`, `channel_canvas_already_exists`, `canvas_too_large`, `canvas_editing_locked`, `invalid_primary_column`, `over_column_maximum`), and add call-level logging (method, elapsed time, ok/error outcome — never tokens or full bodies).
   - Why: every one of the 16 tools goes through this one function, so fixing it once fixes rate-limit handling, error clarity, and observability everywhere at once; the bundled Slack channel plugin already retries 429s up to twice honoring `Retry-After` (`docs/channels/slack/messaging.md`) and this plugin currently has zero handling for that. Cursor pagination is split out into **F-07** so I-05/L-05 aren't serialized behind this larger PR.
   - Scope(s) & token type: none (client-layer change, all existing scopes apply).
   - API methods: none new; affects every method already called.
@@ -163,7 +163,7 @@ later task lands on top of them instead of duplicating the work per-tool.
   - Tests: mocked-fetch tests for a non-JSON 500, a 429-then-success, and each new hint code.
   - Size: M
 
-- [ ] **F-07: Extract a standalone cursor-pagination helper** — Split out of F-03 (see nit there): add a small cursor-pagination helper (`cursor`/`limit` request params, `response_metadata.next_cursor` walking) that any tool can opt into, independent of the response-guard/429-backoff/hint-table/logging work.
+- [x] **F-07: Extract a standalone cursor-pagination helper** — Split out of F-03 (see nit there): add a small cursor-pagination helper (`cursor`/`limit` request params, `response_metadata.next_cursor` walking) that any tool can opt into, independent of the response-guard/429-backoff/hint-table/logging work.
   - Why: I-05 (`slack_scheduled_list`) and L-05 (Lists read tools) need only this helper, not the rest of F-03's larger PR; splitting it lets those land without waiting on F-03's full review, consistent with guiding principle 5 ("split further rather than growing the PR").
   - Scope(s) & token type: none (client-layer change).
   - API methods: none new.
@@ -173,7 +173,7 @@ later task lands on top of them instead of duplicating the work per-tool.
   - Tests: mocked two-page and three-page cursor responses; a response with no `next_cursor` terminates after one page.
   - Size: S
 
-- [ ] **F-04: Split src/index.ts into modules (client, schemas, per-domain tools)** — Break the single 927-line file into at minimum: a Slack client module (fetch/retry/token resolution from F-03/F-07), a shared-schemas module (including one canonical `channelId` schema fragment, replacing the several inconsistently-worded inline copies — confirmed at `src/index.ts:167,321,415,651,692,723-724,866,886,911`, not just four), and per-domain tool modules (messaging, canvases, bookmarks, scheduling/search), re-exported from a thin `src/index.ts`.
+- [x] **F-04: Split src/index.ts into modules (client, schemas, per-domain tools)** — Break the single 927-line file into at minimum: a Slack client module (fetch/retry/token resolution from F-03/F-07), a shared-schemas module (including one canonical `channelId` schema fragment, replacing the several inconsistently-worded inline copies — confirmed at `src/index.ts:167,321,415,651,692,723-724,866,886,911`, not just four), and per-domain tool modules (messaging, canvases, bookmarks, scheduling/search), re-exported from a thin `src/index.ts`.
   - Why: every fix in this roadmap currently touches the same 927-line file, which makes diffs hard to review and raises the chance of an unrelated regression; this also sets up the later `definePluginEntry` migration (O-01) to touch a smaller surface.
   - Scope(s) & token type: none (structural).
   - API methods: none (no behavior change).
@@ -183,7 +183,7 @@ later task lands on top of them instead of duplicating the work per-tool.
   - Tests: existing F-02/F-03 tests pass unmodified except import paths.
   - Size: L
 
-- [ ] **F-05: Add outputSchema, toolMetadata, and integer/length constraints to every tool** — Add `outputSchema` to the 8 tools that lack one (`slack_identity`, `slack_search`, `slack_scheduled_list`, `slack_scheduled_cancel`, `slack_canvas_sections`, `slack_bookmark_list`, `slack_bookmark_add`, `slack_bookmark_remove`); add side-effect metadata (`sideEffecting`, `replaySafe`, `profiles: ["messaging"]`) to all 16; change `count`/`page` (`slack_search`, `src/index.ts:238,240`) and `pageSize` (`slack_post_table`, `src/index.ts:452`) from `Type.Number()` to `Type.Integer()`; add `maxLength`/uniqueness constraints for the limits `slack_post_chart` only documents in prose today (title ≤50 chars, labels ≤20 chars, unique series names — `src/index.ts:556,569,586`).
+- [x] **F-05: Add outputSchema, toolMetadata, and integer/length constraints to every tool** — Add `outputSchema` to the 8 tools that lack one (`slack_identity`, `slack_search`, `slack_scheduled_list`, `slack_scheduled_cancel`, `slack_canvas_sections`, `slack_bookmark_list`, `slack_bookmark_add`, `slack_bookmark_remove`); add side-effect metadata (`sideEffecting`, `replaySafe`, `profiles: ["messaging"]`) to all 16; change `count`/`page` (`slack_search`, `src/index.ts:238,240`) and `pageSize` (`slack_post_table`, `src/index.ts:452`) from `Type.Number()` to `Type.Integer()`; add `maxLength`/uniqueness constraints for the limits `slack_post_chart` only documents in prose today (title ≤50 chars, labels ≤20 chars, unique series names — `src/index.ts:556,569,586`).
   - Why: 8 tools give Code Mode/Tool Search no typed output hint; none declare side-effect metadata that would let the host apply default safety profiles; documented-but-unenforced limits currently round-trip to Slack as an opaque `invalid_blocks` instead of failing fast with a clear message.
   - **Verify before implementing the metadata half:** this plugin still uses `defineToolPlugin` (the `definePluginEntry` migration is O-01, Tier 0.5, which lands right after this tier). The local `sdk-entrypoints/define-tool-plugin.md` and `tool-plugins.md` docs only document `outputSchema` and `optional` as fields `tool()` surfaces into the generated manifest — `sideEffecting`/`replaySafe`/`profiles` are only shown in `building-plugins.md`'s `definePluginEntry`/`api.registerTool` example and in `manifest/capabilities.md`'s hand-authored `openclaw.plugin.json` `toolMetadata` map. Whether `defineToolPlugin`'s `tool()` accepts these fields at all is UNVERIFIED. Confirm with `openclaw plugins inspect slack-workspace --runtime --json` after a trial build before writing them into `tool()` calls. If `tool()` does not emit them: route these three fields through `scripts/patch-manifest.mjs` instead (the same pattern it already uses for `configContracts.secretInputs`/`skills`), which makes this task depend on **F-06** as well; or — preferred now that O-01 is confirmed — defer this part of F-05 to O-01, where `api.registerTool` accepts it, shipping only `outputSchema` and the integer/length constraints now.
   - Scope(s) & token type: none (schema-only).
@@ -194,7 +194,7 @@ later task lands on top of them instead of duplicating the work per-tool.
   - Tests: schema-validation tests for the new length/uniqueness/integer constraints (reject bad input, accept boundary-valid input).
   - Size: M
 
-- [ ] **F-06: Pin the OpenClaw dev dependency and guard the manifest patch step** — Pin `devDependencies.openclaw` (currently `"latest"`, `package.json:25`) to the version recorded in `openclaw.build.openclawVersion` (`2026.9.5`); fix `tsconfig.json`'s `include` (currently `["src/index.ts"]` only) to cover test files; add a test or CI step asserting `openclaw.plugin.json` still contains `configContracts.secretInputs` (botToken, userToken) and `skills: ["./skills"]` after a bare `openclaw plugins build` run, since `scripts/patch-manifest.mjs`'s own comment says the generator drops both.
+- [x] **F-06: Pin the OpenClaw dev dependency and guard the manifest patch step** — Pin `devDependencies.openclaw` (currently `"latest"`, `package.json:25`) to the version recorded in `openclaw.build.openclawVersion` (`2026.9.5`); fix `tsconfig.json`'s `include` (currently `["src/index.ts"]` only) to cover test files; add a test or CI step asserting `openclaw.plugin.json` still contains `configContracts.secretInputs` (botToken, userToken) and `skills: ["./skills"]` after a bare `openclaw plugins build` run, since `scripts/patch-manifest.mjs`'s own comment says the generator drops both.
   - Why: a floating `latest` devDependency means two contributors get two different plugin-API surfaces from the same commit, exactly the drift OpenClaw's own plugin docs warn against; nothing today catches `patch-manifest.mjs`'s effect being silently lost if someone runs the bare `openclaw plugins build` command the docs themselves recommend for troubleshooting.
   - Scope(s) & token type: none.
   - API methods: none.
@@ -212,7 +212,7 @@ The owner confirmed the move to the fuller plugin API (see **Decisions**). These
 land right after Tier 0 so hooks, approvals and the doctor CLI exist before any
 new trust-sensitive tool is written.
 
-- [ ] **O-01: Migrate slack-workspace from defineToolPlugin to definePluginEntry** — `defineToolPlugin` (`src/index.ts:184-188`) "only adds agent-callable tools: no channel, model provider, hook, service, or setup backend" (confirmed live: `openclaw plugins inspect slack-workspace --runtime --json` shows `hookCount: 0`). Every feature needing `api.on(...)` hooks (permission requests, message-sending policy) or `api.registerCli(...)` (a doctor subcommand) requires `definePluginEntry`. Hand-author `openclaw.plugin.json` going forward (the delta from today is smaller than it looks, since `scripts/patch-manifest.mjs` already hand-patches it) and keep the 16 (by then, many more) tool definitions via `api.registerTool`.
+- [x] **O-01: Migrate slack-workspace from defineToolPlugin to definePluginEntry** — `defineToolPlugin` (`src/index.ts:184-188`) "only adds agent-callable tools: no channel, model provider, hook, service, or setup backend" (confirmed live: `openclaw plugins inspect slack-workspace --runtime --json` shows `hookCount: 0`). Every feature needing `api.on(...)` hooks (permission requests, message-sending policy) or `api.registerCli(...)` (a doctor subcommand) requires `definePluginEntry`. Hand-author `openclaw.plugin.json` going forward (the delta from today is smaller than it looks, since `scripts/patch-manifest.mjs` already hand-patches it) and keep the 16 (by then, many more) tool definitions via `api.registerTool`.
   - Why: gates permission requests (O-02), a scope-audit doctor CLI (O-03), and (eventually, as separate future work) `link_shared` unfurl handling and modal `view_submission` round-tripping. Confirmed by the owner (see **Decisions**) and scheduled directly after Tier 0 so that every later tool is written against `definePluginEntry`/`api.registerTool` rather than migrated afterwards.
   - Scope(s) & token type: none (architecture change).
   - API methods: none directly; affects how every existing tool is registered.
@@ -222,7 +222,7 @@ new trust-sensitive tool is written.
   - Tests: existing tool tests pass unchanged; a new test confirms at least one hook is registered.
   - Size: L
 
-- [ ] **O-02: Add before_tool_call permission requests for destructive operations** — No tool in this plugin requests approval before executing. `slack_canvas_edit` (`replace`/`delete` operations), `slack_bookmark_remove`, `slack_scheduled_cancel`, and S-01/S-02's channel-lifecycle tools are all irreversible, hard-to-undo, or disruptive. Use `api.on("before_tool_call", ...)` returning `requireApproval` with an `external-post`-style scope.
+- [x] **O-02: Add before_tool_call permission requests for destructive operations** — No tool in this plugin requests approval before executing. `slack_canvas_edit` (`replace`/`delete` operations), `slack_bookmark_remove`, `slack_scheduled_cancel`, and S-01/S-02's channel-lifecycle tools are all irreversible, hard-to-undo, or disruptive. Use `api.on("before_tool_call", ...)` returning `requireApproval` with an `external-post`-style scope.
   - Why: the workspace already has `channels.slack.execApprovals: { enabled: "auto", target: "dm" }` configured and Slack already renders plugin approvals as native Block Kit buttons — this is a config-compatible feature, not a new integration.
   - Scope(s) & token type: none new.
   - API methods: none new.
@@ -233,7 +233,7 @@ new trust-sensitive tool is written.
   - Tests: a test simulating the hook's approval/denial decision short-circuits the underlying Slack call.
   - Size: M
 
-- [ ] **O-03: Add a slack-workspace doctor/scope-audit CLI subcommand** — The Slack app's manifest lists more scopes than the installed token may actually carry if it hasn't been reinstalled. `slack_identity` already calls `auth.test` and returns granted scopes; add `api.registerCli("slack-workspace", { doctor: ... })` that diffs the live token's scopes against what each tool actually needs, for both bot and user tokens.
+- [x] **O-03: Add a slack-workspace doctor/scope-audit CLI subcommand** — The Slack app's manifest lists more scopes than the installed token may actually carry if it hasn't been reinstalled. `slack_identity` already calls `auth.test` and returns granted scopes; add `api.registerCli("slack-workspace", { doctor: ... })` that diffs the live token's scopes against what each tool actually needs, for both bot and user tokens.
   - Why: turns scope drift from a mid-task runtime surprise into a proactive, human-runnable check.
   - Scope(s) & token type: none new (reads via `auth.test`, already used).
   - API methods: `auth.test`.
@@ -250,7 +250,7 @@ new trust-sensitive tool is written.
 Concrete, verified bugs and gaps in the 16 shipped tools. Independent of each
 other except where noted; all assume F-02/F-03 exist for test coverage.
 
-- [ ] **I-01: Fix the malformed canvas permalink URL** — `canvasUrl()` (`src/index.ts:119`) builds `https://slack.com/docs/${canvasId}`, which is not a real Slack canvas URL shape (canvas permalinks are workspace-scoped) and which `canvases.create`'s documented response never actually returns (`{ok, canvas_id}` only — no `url` field). Cache the workspace origin/team id from one `auth.test` call (already made in `slack_identity`) and build a URL whose shape is verified against a live, read-only follow-up call.
+- [x] **I-01: Fix the malformed canvas permalink URL** — `canvasUrl()` (`src/index.ts:119`) builds `https://slack.com/docs/${canvasId}`, which is not a real Slack canvas URL shape (canvas permalinks are workspace-scoped) and which `canvases.create`'s documented response never actually returns (`{ok, canvas_id}` only — no `url` field). Cache the workspace origin/team id from one `auth.test` call (already made in `slack_identity`) and build a URL whose shape is verified against a live, read-only follow-up call.
   - Why: every canvas link this plugin hands back (`slack_canvas_create`, `slack_canvas_edit`) 404s today.
   - Scope(s) & token type: none new; uses the existing bot or user token already used for `auth.test`.
   - API methods: `auth.test` (cached, not re-called per canvas op); a read-only lookup (e.g. `canvases.sections.lookup` or `conversations.info`, whichever resolves against the constructed URL's team id) to validate the URL shape without a browser.
@@ -260,7 +260,7 @@ other except where noted; all assume F-02/F-03 exist for test coverage.
   - Tests: unit test asserting URL shape; the scripted live check above; the browser open is a PR-description note only (no secret values included).
   - Size: S
 
-- [ ] **I-02: Verify and fix the plan-block task status enum** — `slack_post_plan`'s `status` enum is `in_progress | complete | error` (`src/index.ts:503-510`); Slack's plan-block reference documents `in_progress | pending | complete` and does not document `error`. Post a plan with one task in each of `in_progress`/`pending`/`complete` against a real message in `lostgradient` and confirm Slack renders all three without `invalid_blocks`; then either add `pending` (there's currently no way to represent a not-yet-started step) and remove `error`, or find and cite the exact accepted value for a failed step if one exists.
+- [x] **I-02: Verify and fix the plan-block task status enum** — `slack_post_plan`'s `status` enum is `in_progress | complete | error` (`src/index.ts:503-510`); Slack's plan-block reference documents `in_progress | pending | complete` and does not document `error`. Post a plan with one task in each of `in_progress`/`pending`/`complete` against a real message in `lostgradient` and confirm Slack renders all three without `invalid_blocks`; then either add `pending` (there's currently no way to represent a not-yet-started step) and remove `error`, or find and cite the exact accepted value for a failed step if one exists.
   - Why: callers cannot represent a not-started step today, and `error` may be silently coerced or rejected — a failure mode with no test coverage.
   - Scope(s) & token type: `chat:write`, bot token (existing).
   - API methods: `chat.postMessage` (plan block).
@@ -270,7 +270,7 @@ other except where noted; all assume F-02/F-03 exist for test coverage.
   - Tests: schema test for the new enum values; a note in the PR of what the live verification showed.
   - Size: S
 
-- [ ] **I-03: Return Slack's resolved channel, not the caller's input, from posting tools** — `postOrUpdate` (`src/index.ts:139-164`, used by `slack_post_table`/`plan`/`chart`) and `slack_schedule_message` (`src/index.ts:315-375`) both return the caller's original `channelId` unchanged. When a caller passes a user ID to open a DM, Slack resolves and returns the actual `D…` channel in `data.channel`, and this plugin currently discards it.
+- [x] **I-03: Return Slack's resolved channel, not the caller's input, from posting tools** — `postOrUpdate` (`src/index.ts:139-164`, used by `slack_post_table`/`plan`/`chart`) and `slack_schedule_message` (`src/index.ts:315-375`) both return the caller's original `channelId` unchanged. When a caller passes a user ID to open a DM, Slack resolves and returns the actual `D…` channel in `data.channel`, and this plugin currently discards it.
   - Why: a follow-up call using the tool's own returned `channelId` (e.g., `slack_blocks_update`, `slack_scheduled_cancel`) then targets the wrong ID and fails with `channel_not_found`.
   - Scope(s) & token type: `chat:write`, bot token (existing).
   - API methods: `chat.postMessage` (special ~1 msg/sec/channel tier), `chat.update`, `chat.scheduleMessage` (Tier 3).
@@ -280,7 +280,7 @@ other except where noted; all assume F-02/F-03 exist for test coverage.
   - Tests: mocked test posting with a user ID, asserting the returned `channelId` matches the mocked `data.channel`, not the input.
   - Size: S
 
-- [ ] **I-04: Don't lose the canvas on a partial share failure** — In `slack_canvas_create` (`src/index.ts:740-767`), `canvases.create` runs first and returns `canvas_id`; if the following `canvases.access.set` call throws, the whole tool call throws and the agent never learns the canvas exists.
+- [x] **I-04: Don't lose the canvas on a partial share failure** — In `slack_canvas_create` (`src/index.ts:740-767`), `canvases.create` runs first and returns `canvas_id`; if the following `canvases.access.set` call throws, the whole tool call throws and the agent never learns the canvas exists.
   - Why: the canvas is now orphaned and unshared with no way to recover its ID to retry sharing or clean it up.
   - Scope(s) & token type: `canvases:write` (existing), bot or user token.
   - API methods: `canvases.create`, `canvases.access.set`.
@@ -290,7 +290,7 @@ other except where noted; all assume F-02/F-03 exist for test coverage.
   - Tests: mocked create-succeeds/share-fails sequence.
   - Size: S
 
-- [ ] **I-05: Paginate slack_scheduled_list** — `chat.scheduledMessages.list` supports cursor pagination (`cursor`/`limit`, `response_metadata.next_cursor`), but `slack_scheduled_list` (`src/index.ts:377-408`) neither sends nor follows it.
+- [x] **I-05: Paginate slack_scheduled_list** — `chat.scheduledMessages.list` supports cursor pagination (`cursor`/`limit`, `response_metadata.next_cursor`), but `slack_scheduled_list` (`src/index.ts:377-408`) neither sends nor follows it.
   - Why: a workspace with more scheduled messages than one page gets a silent, confident "no more scheduled messages" that's wrong.
   - Scope(s) & token type: `chat:write`, bot token (existing).
   - API methods: `chat.scheduledMessages.list`.
@@ -300,7 +300,7 @@ other except where noted; all assume F-02/F-03 exist for test coverage.
   - Tests: mocked two-page response.
   - Size: S
 
-- [ ] **I-06: Harden slack_schedule_message's postAt parsing** — `postAt` accepts `string | number` (`src/index.ts:323-357`); an all-digit string (e.g., `"1790000000"`, a valid Unix timestamp typed as JSON string) hits `Date.parse` and produces `NaN`, surfacing a misleading error. Separately, a timezone-less ISO string (`"2026-09-23T09:00:00"`) is parsed as local time in whatever timezone the OpenClaw host runs in, with no warning.
+- [x] **I-06: Harden slack_schedule_message's postAt parsing** — `postAt` accepts `string | number` (`src/index.ts:323-357`); an all-digit string (e.g., `"1790000000"`, a valid Unix timestamp typed as JSON string) hits `Date.parse` and produces `NaN`, surfacing a misleading error. Separately, a timezone-less ISO string (`"2026-09-23T09:00:00"`) is parsed as local time in whatever timezone the OpenClaw host runs in, with no warning.
   - Why: both are silent-wrong-behavior traps for an LLM caller computing "now + N seconds" or an ISO string without an offset.
   - Scope(s) & token type: none (parsing only).
   - API methods: none.
@@ -310,7 +310,7 @@ other except where noted; all assume F-02/F-03 exist for test coverage.
   - Tests: `postAt: "1790000000"` schedules correctly; a timezone-less ISO string is rejected (or documented) per the chosen behavior.
   - Size: S
 
-- [ ] **I-07: Generate a real plain-text fallback for tables and charts** — `postOrUpdate`'s `text` argument for `slack_post_table`/`slack_post_chart` is just the caption/title (`src/index.ts:486,634`) — none of the actual data. `text` is what shows in push notifications and is what Slack's search index falls back to for block-only messages (per the comment already in `slack_search`, `src/index.ts:294-299`).
+- [x] **I-07: Generate a real plain-text fallback for tables and charts** — `postOrUpdate`'s `text` argument for `slack_post_table`/`slack_post_chart` is just the caption/title (`src/index.ts:486,634`) — none of the actual data. `text` is what shows in push notifications and is what Slack's search index falls back to for block-only messages (per the comment already in `slack_search`, `src/index.ts:294-299`).
   - Why: a table or chart posted through these tools is effectively invisible to search and to anyone previewing the notification.
   - Scope(s) & token type: `chat:write`, bot token (existing).
   - API methods: none new.
@@ -320,7 +320,7 @@ other except where noted; all assume F-02/F-03 exist for test coverage.
   - Tests: unit test asserting the generated fallback text contains real data, not just the caption/title.
   - Size: M
 
-- [ ] **I-08: Make link-unfurl behavior explicit and consistent on proactive posts** — `postOrUpdate` and `slack_blocks_send` never set `unfurl_links`/`unfurl_media`, so Slack applies its own default (on) regardless of the channel plugin's own `unfurlLinks` default (`false`, per `docs/channels/slack.md`).
+- [x] **I-08: Make link-unfurl behavior explicit and consistent on proactive posts** — `postOrUpdate` and `slack_blocks_send` never set `unfurl_links`/`unfurl_media`, so Slack applies its own default (on) regardless of the channel plugin's own `unfurlLinks` default (`false`, per `docs/channels/slack.md`).
   - Why: a URL in a table cell or plan step unexpectedly unfurls in a channel where the agent's ordinary replies don't, producing an inconsistent experience across the two plugins' posts.
   - Scope(s) & token type: `chat:write`, bot token (existing).
   - API methods: `chat.postMessage`.
@@ -330,7 +330,7 @@ other except where noted; all assume F-02/F-03 exist for test coverage.
   - Tests: mocked test asserting the default request body sets `unfurl_links: false` unless overridden.
   - Size: S
 
-- [ ] **I-09: Add reply_broadcast parity to table/plan/chart** — `slack_blocks_send` accepts `replyBroadcast` (`src/index.ts:661-665`); the shared `postOrUpdate`-backed tools (`slack_post_table`/`plan`/`chart`) don't expose it at all.
+- [x] **I-09: Add reply_broadcast parity to table/plan/chart** — `slack_blocks_send` accepts `replyBroadcast` (`src/index.ts:661-665`); the shared `postOrUpdate`-backed tools (`slack_post_table`/`plan`/`chart`) don't expose it at all.
   - Why: a live-updating plan/table card posted in a thread has no way to also broadcast to the channel, unlike a hand-built Block Kit message.
   - Scope(s) & token type: `chat:write`, bot token (existing).
   - API methods: `chat.postMessage` (`reply_broadcast`).
@@ -340,7 +340,7 @@ other except where noted; all assume F-02/F-03 exist for test coverage.
   - Tests: mocked test asserting `reply_broadcast: true` is sent when set.
   - Size: S
 
-- [ ] **I-10: Document (and partially close) the gap with core's native presentation renderer** — OpenClaw's core `presentation` contract already renders portable chart/table blocks as native `data_visualization`/`data_table` with the same Slack limits this plugin re-implements, plus resiliency this plugin lacks: an aggregate 10,000-character table limit, splitting >2 charts across follow-up messages, and `invalid_blocks` recovery (strip and re-send as text). Add the missing aggregate-character check to `slack_post_table` and either add chart-splitting to `slack_post_chart` or explicitly document in the block-kit skill when to prefer the core `presentation` path (portable, resilient, but no `updateTs`/proactive posting) versus these Slack-only tools (proactive posts, live card edits via `updateTs`).
+- [x] **I-10: Document (and partially close) the gap with core's native presentation renderer** — OpenClaw's core `presentation` contract already renders portable chart/table blocks as native `data_visualization`/`data_table` with the same Slack limits this plugin re-implements, plus resiliency this plugin lacks: an aggregate 10,000-character table limit, splitting >2 charts across follow-up messages, and `invalid_blocks` recovery (strip and re-send as text). Add the missing aggregate-character check to `slack_post_table` and either add chart-splitting to `slack_post_chart` or explicitly document in the block-kit skill when to prefer the core `presentation` path (portable, resilient, but no `updateTs`/proactive posting) versus these Slack-only tools (proactive posts, live card edits via `updateTs`).
   - Why: two independent implementations of the same Slack contract will drift; these tools remain justified for proactive/automation use and in-place edits, which the reply-turn `presentation` path doesn't offer the same way — but callers need to know which to reach for.
   - Scope(s) & token type: `chat:write`, bot token (existing).
   - API methods: none new.
@@ -350,7 +350,7 @@ other except where noted; all assume F-02/F-03 exist for test coverage.
   - Tests: mocked test asserting an over-limit table throws before any network call.
   - Size: M
 
-- [ ] **I-11: Fix stale plugin description, config docs, and configSchema strictness** — The plugin description ("Create and edit Slack canvases and manage channel bookmarks.", `src/index.ts:187`, `openclaw.plugin.json:4`) covers 2 of the plugin's 6 tool domains; the `userToken` description (`src/index.ts:114`) says it's required by "search and reminders" but there is no reminders tool (until R-01 ships); `configSchema` (`src/index.ts:104-117`) has no `additionalProperties: false`, so a typo'd config key like `boToken` passes validation silently and only fails later as a confusing "No Slack bot token" error.
+- [x] **I-11: Fix stale plugin description, config docs, and configSchema strictness** — The plugin description ("Create and edit Slack canvases and manage channel bookmarks.", `src/index.ts:187`, `openclaw.plugin.json:4`) covers 2 of the plugin's 6 tool domains; the `userToken` description (`src/index.ts:114`) says it's required by "search and reminders" but there is no reminders tool (until R-01 ships); `configSchema` (`src/index.ts:104-117`) has no `additionalProperties: false`, so a typo'd config key like `boToken` passes validation silently and only fails later as a confusing "No Slack bot token" error.
   - Why: this is the first thing anyone reads to understand what the plugin does, and it currently undersells and mis-describes it.
   - Scope(s) & token type: none.
   - API methods: none.
@@ -360,7 +360,7 @@ other except where noted; all assume F-02/F-03 exist for test coverage.
   - Tests: schema test asserting an unknown config key fails validation.
   - Size: S
 
-- [ ] **I-12: Warn on a token/kind prefix mismatch in resolveToken** — `resolveToken()` (`src/index.ts:19-35`) only checks a token string is non-empty; it never checks a `botToken` actually starts with `xoxb-` or a `userToken` with `xoxp-`.
+- [x] **I-12: Warn on a token/kind prefix mismatch in resolveToken** — `resolveToken()` (`src/index.ts:19-35`) only checks a token string is non-empty; it never checks a `botToken` actually starts with `xoxb-` or a `userToken` with `xoxp-`.
   - Why: a misconfigured token (a user token pasted into `botToken`) passes this check and only fails later as an opaque Slack error several layers removed from the actual misconfiguration.
   - Scope(s) & token type: none.
   - API methods: none.
@@ -370,7 +370,7 @@ other except where noted; all assume F-02/F-03 exist for test coverage.
   - Tests: unit test asserting a warning fires for a mismatched prefix and not for a matching one.
   - Size: S
 
-- [ ] **I-13: Align bookmark/canvas-section output shaping with a documented convention** — `slack_search`/`slack_scheduled_list` curate and reshape Slack's raw response; `slack_bookmark_list`/`slack_bookmark_add`/`slack_canvas_sections` return Slack's raw objects untouched. There's no written rule for which a new tool should do.
+- [x] **I-13: Align bookmark/canvas-section output shaping with a documented convention** — `slack_search`/`slack_scheduled_list` curate and reshape Slack's raw response; `slack_bookmark_list`/`slack_bookmark_add`/`slack_canvas_sections` return Slack's raw objects untouched. There's no written rule for which a new tool should do.
   - Why: without a stated convention, the next tool added does whichever the author feels like, and the bookmark/canvas-section tools already forward large, noisy Slack objects the agent doesn't need in full.
   - Scope(s) & token type: `bookmarks:read`/`canvases:read`, existing.
   - API methods: none new.
@@ -387,7 +387,7 @@ other except where noted; all assume F-02/F-03 exist for test coverage.
 The owner's priority feature set beyond the core roadmap: managing public
 channels and letting the agent join them on its own. Scheduled first in Tier 2.
 
-- [ ] **S-01: Add public-channel lifecycle tools, with a built-in confirm guard on archive/rename** — `channels:manage`, `channels:write.topic`, `channels:write.invites` are granted and unused; the channel plugin doesn't expose channel-management actions either. Add `slack_channel_create`, `slack_channel_archive`, `slack_channel_rename`, `slack_channel_set_topic`, `slack_channel_set_purpose`, `slack_channel_invite`. **Every one of these granted scopes is confirmed public-channel-only** (the private-channel equivalents — `groups:write`, `groups:write.topic`, `groups:write.invites` — are not granted), so every tool must detect `is_private` and fail with an explicit "needs `groups:write*`" message rather than a bare `missing_scope`. `slack_channel_archive` and `slack_channel_rename` register with **O-02**'s approval gate, and additionally require an explicit `confirm: true` argument (schema-enforced, no default) as a belt-and-braces guard for non-interactive contexts (cron/automation) where no approval surface is present.
+- [x] **S-01: Add public-channel lifecycle tools, with a built-in confirm guard on archive/rename** — `channels:manage`, `channels:write.topic`, `channels:write.invites` are granted and unused; the channel plugin doesn't expose channel-management actions either. Add `slack_channel_create`, `slack_channel_archive`, `slack_channel_rename`, `slack_channel_set_topic`, `slack_channel_set_purpose`, `slack_channel_invite`. **Every one of these granted scopes is confirmed public-channel-only** (the private-channel equivalents — `groups:write`, `groups:write.topic`, `groups:write.invites` — are not granted), so every tool must detect `is_private` and fail with an explicit "needs `groups:write*`" message rather than a bare `missing_scope`. `slack_channel_archive` and `slack_channel_rename` register with **O-02**'s approval gate, and additionally require an explicit `confirm: true` argument (schema-enforced, no default) as a belt-and-braces guard for non-interactive contexts (cron/automation) where no approval surface is present.
   - Why: a real, requested capability gap on a public, irreversible-ish (archive) or disruptive (rename) surface, with a hard, easy-to-hit scope limitation that must be surfaced clearly rather than discovered as a confusing runtime failure.
   - Scope(s) & token type: `channels:manage` (or `channels:write.topic`/`channels:write.invites`), bot token.
   - API methods: `conversations.create`, `.archive`, `.unarchive`, `.rename`, `.setTopic`, `.setPurpose` (all Tier 2), `.invite` (Tier 3).
@@ -397,7 +397,7 @@ channels and letting the agent join them on its own. Scheduled first in Tier 2.
   - Tests: mocked success path + mocked private-channel rejection for each tool; a test asserting archive/rename without `confirm: true` never reaches the network call.
   - Size: M
 
-- [ ] **S-02: Add slack_channel_kickoff composite tool** — Compose S-01's create/set-topic/set-purpose/invite plus the existing `slack_canvas_create` and `slack_bookmark_add` into one "stand up a project room" call.
+- [x] **S-02: Add slack_channel_kickoff composite tool** — Compose S-01's create/set-topic/set-purpose/invite plus the existing `slack_canvas_create` and `slack_bookmark_add` into one "stand up a project room" call.
   - Why: the highest-value composite of the channel-lifecycle tools, but touches multiple destructive/high-blast-radius operations in one call.
   - Scope(s) & token type: same as S-01, plus `canvases:write`/`bookmarks:write` (existing).
   - API methods: same as S-01, plus `canvases.create`, `bookmarks.add`.
@@ -407,7 +407,7 @@ channels and letting the agent join them on its own. Scheduled first in Tier 2.
   - Tests: mocked full-success sequence; mocked partial-failure sequence (e.g., invite fails after create succeeds).
   - Size: M
 
-- [ ] **S-07: Add channel join/leave tools and auto-join public channels on demand** — The owner wants the agent to join public channels on its own. Add `slack_channel_join(channelId)` and `slack_channel_leave(channelId)`, and make the shared client auto-join: when a bot-token call against a **public** channel fails with `not_in_channel`, call `conversations.join` once and retry the original call once. Tool results report `autoJoined: true` when this happened so the agent knows it is now a member.
+- [x] **S-07: Add channel join/leave tools and auto-join public channels on demand** — The owner wants the agent to join public channels on its own. Add `slack_channel_join(channelId)` and `slack_channel_leave(channelId)`, and make the shared client auto-join: when a bot-token call against a **public** channel fails with `not_in_channel`, call `conversations.join` once and retry the original call once. Tool results report `autoJoined: true` when this happened so the agent knows it is now a member.
   - Why: today any read (`conversations.history`, pins, bookmarks) or write in a channel the bot hasn't been invited to fails with `not_in_channel` and the agent has to ask a human to `/invite` it; for public channels it can simply join.
   - Scope(s) & token type: `channels:join` (bot) for `conversations.join` — **not currently granted; added by O-12**. `conversations.leave` works with the already-granted `channels:manage` (bot). Verified against docs.slack.dev on 2026-09-23.
   - API methods: `conversations.join`, `conversations.leave`, `conversations.info` (to check `is_private`/`is_archived` before joining).
@@ -428,7 +428,7 @@ Canvases are already partially implemented (`slack_canvas_create`,
 completes the CRUD/access surface and adds the two capabilities most requested:
 channel (tab) canvases and canvas-from-thread summaries.
 
-- [ ] **C-01: Add insert_after, insert_before, and delete to slack_canvas_edit** — `canvases.edit` supports `insert_after`/`insert_before` (both take a `section_id` — exactly what `slack_canvas_sections` exists to produce) and a section-level `delete`, none of which the tool's `operation` union exposes (`src/index.ts:769-833`, union at `776-784`, `sectionId` wired only to `replace` at `819-823`).
+- [x] **C-01: Add insert_after, insert_before, and delete to slack_canvas_edit** — `canvases.edit` supports `insert_after`/`insert_before` (both take a `section_id` — exactly what `slack_canvas_sections` exists to produce) and a section-level `delete`, none of which the tool's `operation` union exposes (`src/index.ts:769-833`, union at `776-784`, `sectionId` wired only to `replace` at `819-823`).
   - Why: today you can look up a section via `slack_canvas_sections` but never insert relative to it or remove it — half the workflow the two tools were designed to support together.
   - Scope(s) & token type: `canvases:write`, bot or user token.
   - API methods: `canvases.edit`.
@@ -438,7 +438,7 @@ channel (tab) canvases and canvas-from-thread summaries.
   - Tests: one test per new operation asserting the correct `changes[]` payload.
   - Size: M
 
-- [ ] **C-02: Add a sectionTypes filter to slack_canvas_sections** — The tool's description promises filtering "by heading level" (`src/index.ts:838`), but only `containsText` (mapped to `criteria.contains_text`, `src/index.ts:842-844`) exists. `canvases.sections.lookup`'s real `criteria` also accepts `section_types` (`h1`, `h2`, `h3`, `any_header`, `table`, `list`, `callout`, `blockquote`).
+- [x] **C-02: Add a sectionTypes filter to slack_canvas_sections** — The tool's description promises filtering "by heading level" (`src/index.ts:838`), but only `containsText` (mapped to `criteria.contains_text`, `src/index.ts:842-844`) exists. `canvases.sections.lookup`'s real `criteria` also accepts `section_types` (`h1`, `h2`, `h3`, `any_header`, `table`, `list`, `callout`, `blockquote`).
   - Why: the advertised heading-level filter is currently unreachable.
   - Scope(s) & token type: `canvases:read`, bot or user token.
   - API methods: `canvases.sections.lookup`.
@@ -448,7 +448,7 @@ channel (tab) canvases and canvas-from-thread summaries.
   - Tests: mocked tests for `containsText` alone, `sectionTypes` alone, and combined.
   - Size: S
 
-- [ ] **C-03: Add slack_canvas_delete** — `canvases.delete` (canvas-level, distinct from the section-level `delete` in C-01) removes a standalone canvas entirely; no tool wraps it.
+- [x] **C-03: Add slack_canvas_delete** — `canvases.delete` (canvas-level, distinct from the section-level `delete` in C-01) removes a standalone canvas entirely; no tool wraps it.
   - Why: the plugin can create canvases freely but has no cleanup path — agent-created scratch/status canvases accumulate forever.
   - Scope(s) & token type: `canvases:write`, bot or user token.
   - API methods: `canvases.delete` (Tier 3).
@@ -458,7 +458,7 @@ channel (tab) canvases and canvas-from-thread summaries.
   - Tests: mocked success and mocked `canvas_not_found`.
   - Size: S
 
-- [ ] **C-04: Add multi-target canvas access management** — `slack_canvas_create` wraps a single `channelId` into a one-item `channel_ids` array with `access_level` limited to `read`/`write` (`src/index.ts:719-765`); there is no way to share to multiple channels or specific users, no `owner` level, and no way to revoke access once granted (`canvases.access.delete` is unused).
+- [x] **C-04: Add multi-target canvas access management** — `slack_canvas_create` wraps a single `channelId` into a one-item `channel_ids` array with `access_level` limited to `read`/`write` (`src/index.ts:719-765`); there is no way to share to multiple channels or specific users, no `owner` level, and no way to revoke access once granted (`canvases.access.delete` is unused).
   - Why: once shared, access can currently only grow, never shrink, through this plugin.
   - Scope(s) & token type: `canvases:write`, bot or user token.
   - API methods: `canvases.access.set`, `canvases.access.delete`.
@@ -468,7 +468,7 @@ channel (tab) canvases and canvas-from-thread summaries.
   - Tests: mocked tests for channel-array, user-array, and revoke paths.
   - Size: M
 
-- [ ] **C-05: Support channel (tab) canvases** — The plugin only creates standalone canvases shared as a file; it never creates or resolves a channel's single native canvas tab (`conversations.canvases.create`, one per channel, id readable from `conversations.info`'s `channel.properties.canvas`; creating a second returns `channel_canvas_already_exists`).
+- [x] **C-05: Support channel (tab) canvases** — The plugin only creates standalone canvases shared as a file; it never creates or resolves a channel's single native canvas tab (`conversations.canvases.create`, one per channel, id readable from `conversations.info`'s `channel.properties.canvas`; creating a second returns `channel_canvas_already_exists`).
   - Why: channel canvases are the most discoverable home for a status board — they appear in the channel UI with no bookmark needed.
   - Scope(s) & token type: `canvases:write` + `channels:read`, bot or user token.
   - API methods: `conversations.info`, `conversations.canvases.create`.
@@ -478,7 +478,7 @@ channel (tab) canvases and canvas-from-thread summaries.
   - Tests: mocked "canvas exists" and "canvas missing, create" paths.
   - Size: M
 
-- [ ] **C-06: Add slack_canvas_from_thread** — Nothing in this plugin reads channel or thread content (`conversations.history`/`conversations.replies` are called nowhere in `src/index.ts` despite the bot already having `channels:history`/`groups:history`/`im:history`/`mpim:history`). Add a tool that fetches a thread, synthesizes a markdown summary, and creates or appends into a canvas, then shares it via C-04.
+- [x] **C-06: Add slack_canvas_from_thread** — Nothing in this plugin reads channel or thread content (`conversations.history`/`conversations.replies` are called nowhere in `src/index.ts` despite the bot already having `channels:history`/`groups:history`/`im:history`/`mpim:history`). Add a tool that fetches a thread, synthesizes a markdown summary, and creates or appends into a canvas, then shares it via C-04.
   - Why: this is the one explicitly-requested Canvas capability the plugin currently cannot do at all.
   - Scope(s) & token type: `channels:history`/`groups:history`/`im:history`/`mpim:history` (read) + `canvases:write`, bot or user token.
   - API methods: `conversations.replies`, `canvases.create` or `canvases.edit`, `canvases.access.set`.
@@ -488,7 +488,7 @@ channel (tab) canvases and canvas-from-thread summaries.
   - Tests: mocked thread fetch + canvas create/share sequence.
   - Size: M
 
-- [ ] **C-07: Living status-canvas helper (idempotent section replace)** — Combine C-01's `insert_after`/`insert_before`, C-05's channel-canvas lookup, and `slack_canvas_sections` to maintain one canvas per channel where a scheduled/triggered run rewrites only a stable, agent-owned section (matched by heading text via `sectionTypes` + `containsText`), leaving the rest untouched. Because `canvases.sections.lookup` appears to return only an opaque `id` (not the section's current text — confirm this live during implementation), the update must anchor on a stable heading string and re-look-up the section id fresh before every replace rather than caching a previously-seen id (id stability across intervening edits is unverified).
+- [x] **C-07: Living status-canvas helper (idempotent section replace)** — Combine C-01's `insert_after`/`insert_before`, C-05's channel-canvas lookup, and `slack_canvas_sections` to maintain one canvas per channel where a scheduled/triggered run rewrites only a stable, agent-owned section (matched by heading text via `sectionTypes` + `containsText`), leaving the rest untouched. Because `canvases.sections.lookup` appears to return only an opaque `id` (not the section's current text — confirm this live during implementation), the update must anchor on a stable heading string and re-look-up the section id fresh before every replace rather than caching a previously-seen id (id stability across intervening edits is unverified).
   - Why: this is the natural pattern for "keep one status board current" that several of the other findings point toward.
   - Scope(s) & token type: `canvases:read`/`canvases:write`, bot or user token.
   - API methods: `canvases.sections.lookup`, `canvases.edit`.
@@ -498,7 +498,7 @@ channel (tab) canvases and canvas-from-thread summaries.
   - Tests: mocked test running the helper twice in a row with different lookup results, asserting no crash and the correct section replaced each time.
   - Size: L
 
-- [ ] **C-08: Canvas markdown templates via a new skill** — Neither `canvases.create` nor `canvases.edit` documents any template/duplicate mechanism (unlike Lists' `copy_from_list_id`). Ship `skills/slack-canvas/` with 2-3 starter markdown templates (status board, meeting notes, project brief) using `{{placeholder}}` substitution, consumed by `slack_canvas_create`.
+- [x] **C-08: Canvas markdown templates via a new skill** — Neither `canvases.create` nor `canvases.edit` documents any template/duplicate mechanism (unlike Lists' `copy_from_list_id`). Ship `skills/slack-canvas/` with 2-3 starter markdown templates (status board, meeting notes, project brief) using `{{placeholder}}` substitution, consumed by `slack_canvas_create`.
   - Why: "templated canvases" has to be a plugin-side feature since Slack provides no canvas templating API; canvas markdown is also a materially different dialect from Block Kit (no Block Kit at all; flexbox columns, callouts, blockquotes, checklists, a 300-cell-per-table limit, 1 MiB-per-change limit) and deserves its own skill the way Block Kit does.
   - Scope(s) & token type: `canvases:write`, bot or user token.
   - API methods: `canvases.create`.
@@ -508,7 +508,7 @@ channel (tab) canvases and canvas-from-thread summaries.
   - Tests: unit test asserting placeholder substitution produces valid markdown for each template.
   - Size: M
 
-- [ ] **C-09: Spike + ship canvas discovery** — Every canvas feature above assumes the caller already has a `canvas_id`. Confirm the discovery method (canvases are internally stored as files, so `files.list` filtered to canvas-type files is the likely candidate, using the already-granted `files:read` scope, not a search scope) and ship `slack_canvas_list`.
+- [x] **C-09: Spike + ship canvas discovery** — Every canvas feature above assumes the caller already has a `canvas_id`. Confirm the discovery method (canvases are internally stored as files, so `files.list` filtered to canvas-type files is the likely candidate, using the already-granted `files:read` scope, not a search scope) and ship `slack_canvas_list`.
   - Why: standalone canvases (not the one-per-channel canvas from C-05) are otherwise undiscoverable without already knowing the ID.
   - Scope(s) & token type: `files:read`, bot or user token per whichever method is confirmed.
   - API methods: `files.list` (Tier 3, to confirm) with a canvas-type filter.
@@ -531,7 +531,7 @@ L-07 are CRUD/access/discovery wrappers; **L-08** is the compelling
 outcome-level feature on top of them (thread action items → a synced List),
 matching the Canvases tier's C-06/C-07.
 
-- [ ] **L-01: Add slack_list_create** — Wrap `slackLists.create` (name, `schema` of typed columns, `todo_mode`, optional `copy_from_list_id`/`include_copied_list_records` for templating).
+- [x] **L-01: Add slack_list_create** — Wrap `slackLists.create` (name, `schema` of typed columns, `todo_mode`, optional `copy_from_list_id`/`include_copied_list_records` for templating).
   - Why: this is the entry point every other Lists tool needs a real `list_id` to operate against.
   - Scope(s) & token type: `lists:write`, bot or user token (both work identically per research — confirm during implementation).
   - API methods: `slackLists.create`.
@@ -541,7 +541,7 @@ matching the Canvases tier's C-06/C-07.
   - Tests: mocked create, including a copy-from-template call.
   - Size: M
 
-- [ ] **L-02: Add slack_list_schema (column/option name resolver)** — `slackLists.items.update` needs a `row_id` and `column_id` per cell, and select-type columns need option IDs, not labels — none of which an LLM caller can know without first reading the schema. Wrap `slackLists.items.list` (`include_list=true`) or `.info` to resolve human column names and option labels to Slack's internal IDs.
+- [x] **L-02: Add slack_list_schema (column/option name resolver)** — `slackLists.items.update` needs a `row_id` and `column_id` per cell, and select-type columns need option IDs, not labels — none of which an LLM caller can know without first reading the schema. Wrap `slackLists.items.list` (`include_list=true`) or `.info` to resolve human column names and option labels to Slack's internal IDs.
   - Why: every other Lists item-CRUD tool needs this to let callers work in names instead of opaque IDs.
   - Scope(s) & token type: `lists:read`, bot or user token.
   - API methods: `slackLists.items.list` (`include_list=true`) or `slackLists.items.info`.
@@ -551,7 +551,7 @@ matching the Canvases tier's C-06/C-07.
   - Tests: mocked response with text, select, and user-type columns.
   - Size: M
 
-- [ ] **L-03: Document the List schema-immutability constraint** — `slackLists.update` only accepts `name`, `description_blocks`, and `todo_mode` — there is no method to add/remove/retype columns after creation, and there is no upsert-by-external-key method, so any future "sync with external data" tool must persist its own external-id-to-row_id mapping outside Slack.
+- [x] **L-03: Document the List schema-immutability constraint** — `slackLists.update` only accepts `name`, `description_blocks`, and `todo_mode` — there is no method to add/remove/retype columns after creation, and there is no upsert-by-external-key method, so any future "sync with external data" tool must persist its own external-id-to-row_id mapping outside Slack.
   - Why: this constraint must shape any sync-tool design before one is built, or it'll be built on a false assumption and need a rewrite.
   - Scope(s) & token type: n/a (documentation).
   - API methods: n/a.
@@ -561,7 +561,7 @@ matching the Canvases tier's C-06/C-07.
   - Tests: none (doc task).
   - Size: S
 
-- [ ] **L-04: Add Lists item CRUD tools** — `slack_list_item_create` (`initial_fields`, `parent_item_id` for subtasks), `slack_list_item_update` (batched cells against `row_id`/`column_id`, accepting column *names* resolved via L-02), `slack_list_item_delete`, and `slack_list_items_delete_multiple`.
+- [x] **L-04: Add Lists item CRUD tools** — `slack_list_item_create` (`initial_fields`, `parent_item_id` for subtasks), `slack_list_item_update` (batched cells against `row_id`/`column_id`, accepting column *names* resolved via L-02), `slack_list_item_delete`, and `slack_list_items_delete_multiple`.
   - Why: this is the write half of the Lists CRUD surface.
   - Scope(s) & token type: `lists:write` (+ `lists:read` via L-02), bot or user token.
   - API methods: `slackLists.items.create` (Tier 3), `.update` (Tier 3), `.delete` (Tier 2), `.deleteMultiple` (Tier 2).
@@ -571,7 +571,7 @@ matching the Canvases tier's C-06/C-07.
   - Tests: one test per column type's write shape; a create-with-parent (subtask) test.
   - Size: L (split further into create/update vs. delete/deleteMultiple if it grows mid-implementation)
 
-- [ ] **L-05: Add Lists read tools** — `slack_list_items_list` (cursor pagination via F-07's helper, archived filter) and `slack_list_item_info` (single record + subtasks).
+- [x] **L-05: Add Lists read tools** — `slack_list_items_list` (cursor pagination via F-07's helper, archived filter) and `slack_list_item_info` (single record + subtasks).
   - Why: completes the read half of the Lists CRUD surface.
   - Scope(s) & token type: `lists:read`, bot or user token.
   - API methods: `slackLists.items.list` (Tier 2), `slackLists.items.info` (Tier 2).
@@ -581,7 +581,7 @@ matching the Canvases tier's C-06/C-07.
   - Tests: mocked two-page list, mocked single-item-with-subtasks fetch.
   - Size: M
 
-- [ ] **L-06: Add Lists access management** — `slack_list_access_set`/`slack_list_access_delete`, mirroring the channel/user/access-level pattern established for canvases in C-04.
+- [x] **L-06: Add Lists access management** — `slack_list_access_set`/`slack_list_access_delete`, mirroring the channel/user/access-level pattern established for canvases in C-04.
   - Why: completes CRUD parity with the canvas access tools.
   - Scope(s) & token type: `lists:write`, bot or user token.
   - API methods: `slackLists.access.set`, `slackLists.access.delete` (confirm exact argument shape and rate tier during implementation — unverified in research).
@@ -602,7 +602,7 @@ matching the Canvases tier's C-06/C-07.
   - Tests: mocked test against the confirmed method, if one exists.
   - Size: S
 
-- [ ] **L-08: Add slack_list_from_thread (thread action items → synced List)** — The Lists tasks above (L-01..L-07) are exclusively create/read/update/delete/access/discovery CRUD wrappers; add one outcome-level composite, mirroring Canvases' **C-06**: fetch a thread (`conversations.replies`, already-granted history scopes), extract candidate action items, create a `todo_mode` List (or append rows to an existing one) via L-01/L-04, and return the created `list_id` plus row count.
+- [x] **L-08: Add slack_list_from_thread (thread action items → synced List)** — The Lists tasks above (L-01..L-07) are exclusively create/read/update/delete/access/discovery CRUD wrappers; add one outcome-level composite, mirroring Canvases' **C-06**: fetch a thread (`conversations.replies`, already-granted history scopes), extract candidate action items, create a `todo_mode` List (or append rows to an existing one) via L-01/L-04, and return the created `list_id` plus row count.
   - Why: the review brief specifically asked whether Lists is covered with compelling features, not just CRUD; this gives Lists the same kind of outcome-level task Canvases already has in C-06/C-07, reusing the same `fetchThread` helper C-06 introduces instead of duplicating it.
   - Scope(s) & token type: `channels:history`/`groups:history`/`im:history`/`mpim:history` (read, existing) + `lists:write`, bot or user token.
   - API methods: `conversations.replies`, `slackLists.create` or `slackLists.items.create`.
@@ -620,7 +620,7 @@ Message metadata, file uploads, a structured rich_text builder, and the
 assistant-thread methods this plugin can safely own (the ones the bundled
 channel plugin does *not* already own — see **Not doing**, below).
 
-- [ ] **M-01: Add message metadata write support** — Add an optional `metadata: { eventType, eventPayload }` param to `postOrUpdate` and `slack_blocks_send`/`slack_blocks_update`, threaded into `chat.postMessage`/`chat.update`'s `metadata` field. **Manifest registration is a confirmed requirement, not an open question**: Slack's docs (docs.slack.dev/messaging/message-metadata/) state apps must register metadata schemas in the app manifest's `metadata.event_subscriptions` before sending metadata, and "invalid metadata returns a warning and is ignored" — `chat.postMessage`/`chat.update` still return `ok: true`, so an unregistered `event_type` silently drops the metadata with no error surfaced anywhere. `Bowie`'s manifest currently has no `metadata.event_subscriptions` configured, so this **will** silently no-op until the companion manual task below is done.
+- [x] **M-01: Add message metadata write support** — Add an optional `metadata: { eventType, eventPayload }` param to `postOrUpdate` and `slack_blocks_send`/`slack_blocks_update`, threaded into `chat.postMessage`/`chat.update`'s `metadata` field. **Manifest registration is a confirmed requirement, not an open question**: Slack's docs (docs.slack.dev/messaging/message-metadata/) state apps must register metadata schemas in the app manifest's `metadata.event_subscriptions` before sending metadata, and "invalid metadata returns a warning and is ignored" — `chat.postMessage`/`chat.update` still return `ok: true`, so an unregistered `event_type` silently drops the metadata with no error surfaced anywhere. `Bowie`'s manifest currently has no `metadata.event_subscriptions` configured, so this **will** silently no-op until the companion manual task below is done.
   - Why: this lets a plan/table/chart card carry a machine-readable payload (task id, revision, source data) directly on the message, enabling later reconstruction without re-parsing rendered text — cheap, and the write side needs no new scope (`chat:write` already covers it).
   - Scope(s) & token type: `chat:write`, bot token (existing).
   - API methods: `chat.postMessage`, `chat.update`.
@@ -630,7 +630,7 @@ channel plugin does *not* already own — see **Not doing**, below).
   - Tests: mocked test asserting `metadata` is forwarded when set and absent when not.
   - Size: M
 
-- [ ] **M-02: Add slack_message_get (read metadata back)** — A tool wrapping `conversations.history`/`conversations.replies` with `include_all_metadata=true` (gated by the already-granted `metadata.message:read` bot scope) so the agent can re-find/update its own cards by the id stamped in M-01, without caching `ts` values or fuzzy text search.
+- [x] **M-02: Add slack_message_get (read metadata back)** — A tool wrapping `conversations.history`/`conversations.replies` with `include_all_metadata=true` (gated by the already-granted `metadata.message:read` bot scope) so the agent can re-find/update its own cards by the id stamped in M-01, without caching `ts` values or fuzzy text search.
   - Why: completes the read half of message metadata; note `message_metadata_posted/updated/deleted` events are not in the app's subscribed bot events, so this is poll-only via history reads, not event-driven, until the channel plugin subscribes those events (a cross-plugin follow-up, not this task).
   - Scope(s) & token type: `metadata.message:read`, bot token.
   - API methods: `conversations.history`, `conversations.replies`.
@@ -640,7 +640,7 @@ channel plugin does *not* already own — see **Not doing**, below).
   - Tests: mocked `conversations.history` response containing metadata, asserting correct match/extraction.
   - Size: M
 
-- [ ] **M-03: Add a structured rich_text builder** — `rich_text` is the only way to get true bulleted/ordered lists, quotes, and inline code in a Slack message, but today it's only reachable via the internal single-paragraph `richText()` helper (`src/index.ts:134-137`) or by hand-authoring deeply nested `rich_text_section`/`rich_text_list`/`rich_text_quote`/`rich_text_preformatted` JSON through `slack_blocks_send`.
+- [x] **M-03: Add a structured rich_text builder** — `rich_text` is the only way to get true bulleted/ordered lists, quotes, and inline code in a Slack message, but today it's only reachable via the internal single-paragraph `richText()` helper (`src/index.ts:134-137`) or by hand-authoring deeply nested `rich_text_section`/`rich_text_list`/`rich_text_quote`/`rich_text_preformatted` JSON through `slack_blocks_send`.
   - Why: hand-authored rich_text JSON is exactly the kind of thing that costs a round-trip on `invalid_blocks`, per the block-kit skill's own gotchas section.
   - Scope(s) & token type: `chat:write`, bot token (existing).
   - API methods: `chat.postMessage`.
@@ -650,7 +650,7 @@ channel plugin does *not* already own — see **Not doing**, below).
   - Tests: one test per section type asserting the compiled JSON shape.
   - Size: M
 
-- [ ] **M-04: Add file upload support (files.getUploadURLExternal → PUT → files.completeUploadExternal)** — `files:read`/`files:write` are granted but no tool exists for pushing a generated file (report, CSV, chart image) to a channel proactively. Slack requires the 3-step external-upload flow since `files.upload` was retired.
+- [x] **M-04: Add file upload support (files.getUploadURLExternal → PUT → files.completeUploadExternal)** — `files:read`/`files:write` are granted but no tool exists for pushing a generated file (report, CSV, chart image) to a channel proactively. Slack requires the 3-step external-upload flow since `files.upload` was retired.
   - Why: this is a genuinely new capability, distinct from the channel plugin's in-turn upload/download (which handles ordinary chat-turn attachments, not proactive/out-of-band sends).
   - Scope(s) & token type: `files:write`, bot token.
   - API methods: `files.getUploadURLExternal` (Tier 4), a raw `PUT` to the returned URL, `files.completeUploadExternal`.
@@ -660,7 +660,7 @@ channel plugin does *not* already own — see **Not doing**, below).
   - Tests: mocked three-call sequence (URL fetch, PUT, complete).
   - Size: L
 
-- [ ] **M-05: Add slack_post_ephemeral** — Wrap `chat.postEphemeral` for a private, per-user nudge in a shared channel.
+- [x] **M-05: Add slack_post_ephemeral** — Wrap `chat.postEphemeral` for a private, per-user nudge in a shared channel.
   - Why: `chat:write` already covers it and nothing today lets the agent message just one person in a channel without cluttering it for everyone.
   - Scope(s) & token type: `chat:write`, bot token (existing).
   - API methods: `chat.postEphemeral`.
@@ -670,7 +670,7 @@ channel plugin does *not* already own — see **Not doing**, below).
   - Tests: mocked call asserting correct params and the output-schema shape.
   - Size: S
 
-- [ ] **M-07: Add slack_assistant_set_title** — Wrap `assistant.threads.setTitle` to rename the visible Agent View/Assistant thread title once the agent understands the conversation's topic.
+- [x] **M-07: Add slack_assistant_set_title** — Wrap `assistant.threads.setTitle` to rename the visible Agent View/Assistant thread title once the agent understands the conversation's topic.
   - Why: clean, additive use of the already-granted `assistant:write` scope with no overlap with anything the channel plugin owns (it doesn't call `setTitle` anywhere in the bundled docs).
   - Scope(s) & token type: `assistant:write`, bot token.
   - API methods: `assistant.threads.setTitle`.
@@ -680,7 +680,7 @@ channel plugin does *not* already own — see **Not doing**, below).
   - Tests: mocked call.
   - Size: S
 
-- [ ] **M-08: Spike + stopgap — slack_assistant_suggest_prompts** — Check the status of `openclaw/openclaw#50481` (dynamic `assistant.threads.setSuggestedPrompts` support) before building. If core has not shipped an equivalent message-tool action, add a scoped `slack_assistant_suggest_prompts(channelId, threadTs, prompts[≤4])` as a stopgap, flagged for removal/merge if core ships the equivalent later.
+- [x] **M-08: Spike + stopgap — slack_assistant_suggest_prompts** — Check the status of `openclaw/openclaw#50481` (dynamic `assistant.threads.setSuggestedPrompts` support) before building. If core has not shipped an equivalent message-tool action, add a scoped `slack_assistant_suggest_prompts(channelId, threadTs, prompts[≤4])` as a stopgap, flagged for removal/merge if core ships the equivalent later.
   - Why: core's Slack channel plugin already calls `setSuggestedPrompts` once, threadlessly, only for view detection — not for dynamic per-reply suggestions — so this is a real gap, but two competing code paths writing the same Slack surface would be worse than the gap.
   - Scope(s) & token type: `assistant:write`, bot token.
   - API methods: `assistant.threads.setSuggestedPrompts`.
@@ -690,7 +690,7 @@ channel plugin does *not* already own — see **Not doing**, below).
   - Tests: mocked call; schema test enforcing the ≤4 cap.
   - Size: S
 
-- [ ] **M-09: Verify and document the context_actions feedback-button pattern** — `context_actions` (message-surface feedback buttons, max 5 elements) is listed in the block-kit skill under "Surfaces not yet tested." Verify it renders via `slack_blocks_send` and document a 👍/👎 pattern (not necessarily a new tool, since raw blocks likely suffice).
+- [x] **M-09: Verify and document the context_actions feedback-button pattern** — `context_actions` (message-surface feedback buttons, max 5 elements) is listed in the block-kit skill under "Surfaces not yet tested." Verify it renders via `slack_blocks_send` and document a 👍/👎 pattern (not necessarily a new tool, since raw blocks likely suffice).
   - Why: cheap way to let users rate an agent's answer with one tap.
   - Scope(s) & token type: `chat:write`, bot token (existing).
   - API methods: `chat.postMessage`.
@@ -821,7 +821,7 @@ channel plugin does *not* already own — see **Not doing**, below).
 
 ## Tier 3 — Other scope-backed features
 
-- [ ] **S-03: Add slack_bookmark_edit and check bookmarks.add's type coverage** — `bookmarks:write` already covers `bookmarks.edit` (title/link/emoji in place) but only add/remove/list exist today; editing requires remove+re-add, which changes the bookmark's id/position. Separately, `slack_bookmark_add` hardcodes `type: "link"` with no way to add other bookmark types Slack's API may support (e.g. a message-permalink bookmark) — confirm what `bookmarks.add`'s `type` field actually accepts and expose any additional values found.
+- [x] **S-03: Add slack_bookmark_edit and check bookmarks.add's type coverage** — `bookmarks:write` already covers `bookmarks.edit` (title/link/emoji in place) but only add/remove/list exist today; editing requires remove+re-add, which changes the bookmark's id/position. Separately, `slack_bookmark_add` hardcodes `type: "link"` with no way to add other bookmark types Slack's API may support (e.g. a message-permalink bookmark) — confirm what `bookmarks.add`'s `type` field actually accepts and expose any additional values found.
   - Why: trivial, same shape as the three existing bookmark tools, completes the CRUD surface; the `type` coverage gap was flagged during research and otherwise has no task tracking it.
   - Scope(s) & token type: `bookmarks:write`, bot or user token (existing).
   - API methods: `bookmarks.edit` (Tier 2), `bookmarks.add` (type-coverage check only, no new tool).
@@ -831,7 +831,7 @@ channel plugin does *not* already own — see **Not doing**, below).
   - Tests: mocked edit call; mocked add call for each additional type exposed (if any).
   - Size: S
 
-- [ ] **S-04: Add read-only usergroup tools** — `usergroups:read` is granted but only used internally by the channel plugin (to resolve `<!subteam^...>` mentions); no agent-facing tool exists. Add `slack_usergroup_list` and `slack_usergroup_members`. `usergroups:write` is **not** granted, so this ships read-only and says so explicitly.
+- [x] **S-04: Add read-only usergroup tools** — `usergroups:read` is granted but only used internally by the channel plugin (to resolve `<!subteam^...>` mentions); no agent-facing tool exists. Add `slack_usergroup_list` and `slack_usergroup_members`. `usergroups:write` is **not** granted, so this ships read-only and says so explicitly.
   - Why: lets an agent answer "who is on @oncall" without guessing from message mentions.
   - Scope(s) & token type: `usergroups:read`, bot or user token.
   - API methods: `usergroups.list` (Tier 2), `usergroups.users.list` (Tier 2).
@@ -841,7 +841,7 @@ channel plugin does *not* already own — see **Not doing**, below).
   - Tests: mocked calls for both.
   - Size: S
 
-- [ ] **S-05: Add remote-file tools** — `remote_files:read`/`write`/`share` are granted and unused by both plugins (distinct from `files:read`/`write`, which cover native Slack file upload/download in a chat turn). Add `slack_remote_file_add` (register an external document — e.g. a Linear issue or generated report link — as a native Slack file object with a preview card), plus `update`/`remove`/`share`.
+- [x] **S-05: Add remote-file tools** — `remote_files:read`/`write`/`share` are granted and unused by both plugins (distinct from `files:read`/`write`, which cover native Slack file upload/download in a chat turn). Add `slack_remote_file_add` (register an external document — e.g. a Linear issue or generated report link — as a native Slack file object with a preview card), plus `update`/`remove`/`share`.
   - Why: lets the agent surface external documents as first-class Slack file objects instead of bare hyperlinks; `files.remote.add` requires a **bot token specifically** (verified — user tokens are rejected).
   - Scope(s) & token type: `remote_files:write`, bot token only.
   - API methods: `files.remote.add` (Tier 2), `.info`, `.list`, `.update`, `.remove`, `.share`.
@@ -871,7 +871,7 @@ channel plugin does *not* already own — see **Not doing**, below).
 Smaller host-integration improvements. The core architecture work (O-01..O-03) was
 promoted to Tier 0.5 once the migration was confirmed (see **Decisions**).
 
-- [ ] **O-04: Default channelId to the active Slack turn via nativeChannelId** — Every tool requires an explicit `channelId` even inside an active Slack conversation turn. `factory`-style tools (supported inside `defineToolPlugin` today, no migration required) receive `nativeChannelId` for the active platform conversation.
+- [x] **O-04: Default channelId to the active Slack turn via nativeChannelId** — Every tool requires an explicit `channelId` even inside an active Slack conversation turn. `factory`-style tools (supported inside `defineToolPlugin` today, no migration required) receive `nativeChannelId` for the active platform conversation.
   - Why: removes a common source of wrong-channel or missing-`channelId` tool-call errors during ordinary chat use, while leaving explicit `channelId` available for out-of-turn automations.
   - Scope(s) & token type: none new.
   - API methods: none new.
@@ -881,7 +881,7 @@ promoted to Tier 0.5 once the migration was confirmed (see **Decisions**).
   - Tests: mocked test with and without an active-turn context.
   - Size: M
 
-- [ ] **O-05: Add manifest categories, uiHints, and plugin artwork** — `openclaw.plugin.json` has no `categories` (ClawHub browse taxonomy — `inbox-collaboration` fits better than `channels`, which is reserved for plugins people talk to the agent through), no `uiHints` marking `botToken`/`userToken` as `sensitive: true`, and no `assets/icon.png`/`assets/activity.svg`.
+- [x] **O-05: Add manifest categories, uiHints, and plugin artwork** — `openclaw.plugin.json` has no `categories` (ClawHub browse taxonomy — `inbox-collaboration` fits better than `channels`, which is reserved for plugins people talk to the agent through), no `uiHints` marking `botToken`/`userToken` as `sensitive: true`, and no `assets/icon.png`/`assets/activity.svg`.
   - Why: without `sensitive: true`, the Settings UI has no declared reason to mask these fields beyond generic name heuristics; missing artwork/category is a ClawHub discoverability gap.
   - Scope(s) & token type: none.
   - API methods: none.
@@ -895,7 +895,7 @@ promoted to Tier 0.5 once the migration was confirmed (see **Decisions**).
 
 ## Documentation & skills
 
-- [ ] **D-01: Rewrite README.md** — Currently 12 lines of build commands only. Document all 16+ tools grouped by capability, the `botToken`/`userToken` config shape (string or SecretRef) and which tools need which, required Slack scopes per token kind, and a pointer to `skills/slack-block-kit`.
+- [x] **D-01: Rewrite README.md** — Currently 12 lines of build commands only. Document all 16+ tools grouped by capability, the `botToken`/`userToken` config shape (string or SecretRef) and which tools need which, required Slack scopes per token kind, and a pointer to `skills/slack-block-kit`.
   - Why: everything currently lives only in code comments and one skill file; anyone besides the original author has to reverse-engineer the plugin from source.
   - Scope(s) & token type: n/a.
   - API methods: n/a.
@@ -905,7 +905,7 @@ promoted to Tier 0.5 once the migration was confirmed (see **Decisions**).
   - Tests: none (doc task).
   - Size: S
 
-- [ ] **D-02: Fix SKILL.md's incorrect updateTs claim** — `skills/slack-block-kit/SKILL.md` states "All four tools accept `updateTs`," but `slack_blocks_send`'s parameters have no `updateTs` field — only `slack_blocks_update` (a separate tool, taking `ts` not `updateTs`) can edit an existing raw-blocks message. Fix the claim rather than adding `updateTs` to `slack_blocks_send`: the two tools already have single, clear responsibilities (post new vs. update existing), and duplicating `slack_blocks_update`'s job inside `slack_blocks_send` would just create two ways to do the same thing.
+- [x] **D-02: Fix SKILL.md's incorrect updateTs claim** — `skills/slack-block-kit/SKILL.md` states "All four tools accept `updateTs`," but `slack_blocks_send`'s parameters have no `updateTs` field — only `slack_blocks_update` (a separate tool, taking `ts` not `updateTs`) can edit an existing raw-blocks message. Fix the claim rather than adding `updateTs` to `slack_blocks_send`: the two tools already have single, clear responsibilities (post new vs. update existing), and duplicating `slack_blocks_update`'s job inside `slack_blocks_send` would just create two ways to do the same thing.
   - Why: an agent following the skill's literal claim gets a schema-rejection round-trip today.
   - Scope(s) & token type: n/a.
   - API methods: n/a.
@@ -915,7 +915,7 @@ promoted to Tier 0.5 once the migration was confirmed (see **Decisions**).
   - Tests: none (doc task).
   - Size: S
 
-- [ ] **D-03: Document legacy attachments, the scheduled-digest recipe, and other out-of-scope items explicitly** — Slack's legacy `attachments` parameter is deprecated in favor of Block Kit for new development; this plugin correctly has none. Record this, and the other items in **Not doing** below, in the skill/README so a future contributor doesn't "discover" the gap and implement something already deliberately excluded. Also write up the "scheduled-digest recipe" pattern from **O-08** (rewriting a recurring automation's prompt to call `slack_post_table`/`slack_canvas_edit(append)` and reuse `updateTs` so N future messages become one edited card) so it's discoverable for future automations, not just applied once to the one job O-08 touches by hand.
+- [x] **D-03: Document legacy attachments, the scheduled-digest recipe, and other out-of-scope items explicitly** — Slack's legacy `attachments` parameter is deprecated in favor of Block Kit for new development; this plugin correctly has none. Record this, and the other items in **Not doing** below, in the skill/README so a future contributor doesn't "discover" the gap and implement something already deliberately excluded. Also write up the "scheduled-digest recipe" pattern from **O-08** (rewriting a recurring automation's prompt to call `slack_post_table`/`slack_canvas_edit(append)` and reuse `updateTs` so N future messages become one edited card) so it's discoverable for future automations, not just applied once to the one job O-08 touches by hand.
   - Why: prevents re-litigating settled decisions, and makes a manually-applied pattern (O-08) reusable rather than one-off.
   - Scope(s) & token type: n/a.
   - API methods: n/a.
