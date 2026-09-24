@@ -196,9 +196,58 @@ export async function callSlack(
  * Who a token authenticates as, plus the scopes Slack reports it was granted. Read-only:
  * `auth.test` changes nothing, so it is safe for diagnostics like the doctor command.
  */
-export function authTest(
+export async function authTest(
   token: string,
   context?: SlackCallContext,
 ): Promise<{ data: SlackResponse; scopes: string[] }> {
-  return callSlackRaw("auth.test", token, {}, context);
+  const result = await callSlackRaw("auth.test", token, {}, context);
+  const workspace = workspaceFromAuthTest(result.data);
+  if (workspace) workspaces.set(token, Promise.resolve(workspace));
+  return result;
+}
+
+/** The workspace a token belongs to: its web origin and team id. */
+export type Workspace = { origin: string; teamId: string };
+
+/** One `auth.test` per token per process; `slack_identity` primes this too. */
+const workspaces = new Map<string, Promise<Workspace | null>>();
+
+function workspaceFromAuthTest(data: SlackResponse): Workspace | null {
+  if (typeof data.url !== "string" || typeof data.team_id !== "string") return null;
+  try {
+    return { origin: new URL(data.url).origin, teamId: data.team_id };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The token's workspace, from a cached `auth.test`. Resolves to null rather than
+ * throwing when the lookup fails, and forgets the failure so the next call retries.
+ */
+export function workspaceFor(token: string, context?: SlackCallContext): Promise<Workspace | null> {
+  const cached = workspaces.get(token);
+  if (cached) return cached;
+  const lookup = callSlackRaw("auth.test", token, {}, context).then(
+    ({ data }) => workspaceFromAuthTest(data),
+    () => null,
+  );
+  workspaces.set(token, lookup);
+  void lookup.then((workspace) => {
+    if (!workspace && workspaces.get(token) === lookup) workspaces.delete(token);
+  });
+  return lookup;
+}
+
+/** Test hook: forget every cached workspace. */
+export function resetWorkspaceCache(): void {
+  workspaces.clear();
+}
+
+/**
+ * Canvas permalinks are workspace-scoped: `https://<workspace>.slack.com/docs/<team id>/<canvas id>`.
+ * `canvases.create` returns only `canvas_id`, so the URL has to be built here.
+ */
+export function canvasPermalink(workspace: Workspace, canvasId: string): string {
+  return `${workspace.origin}/docs/${workspace.teamId}/${canvasId}`;
 }

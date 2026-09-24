@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { APPROVAL_RULES, approvalFor } from "./approvals.js";
-import { registerPlugin, slackResponse, withMockFetch } from "./test-utils.js";
+import { registerPlugin, slackResponse, withMockFetch, type RecordedCall } from "./test-utils.js";
 
 type Decision = "allow-once" | "deny";
 
@@ -114,6 +114,10 @@ describe("approval registry", () => {
   });
 });
 
+/** Slack methods called, minus the read-only `auth.test` canvas tools use to build URLs. */
+const writes = (calls: RecordedCall[]) =>
+  calls.map((call) => call.method).filter((method) => method !== "auth.test");
+
 describe("before_tool_call approvals", () => {
   it.each(gated)("a denied %s never reaches Slack", async (toolName, params) => {
     await withMockFetch(
@@ -134,7 +138,7 @@ describe("before_tool_call approvals", () => {
         const { approval, executed } = await callWithApproval(toolName, params, "allow-once");
         expect(approval).toBeDefined();
         expect(executed).toBe(true);
-        expect(calls.map((call) => call.method)).toEqual([method]);
+        expect(writes(calls)).toEqual([method]);
       },
     );
   });
@@ -150,7 +154,7 @@ describe("before_tool_call approvals", () => {
         );
         expect(approval).toBeUndefined();
         expect(executed).toBe(true);
-        expect(calls.map((call) => call.method)).toEqual(["canvases.edit"]);
+        expect(writes(calls)).toEqual(["canvases.edit"]);
       },
     );
   });
