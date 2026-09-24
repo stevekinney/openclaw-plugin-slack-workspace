@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 import { callSlack, resolveToken } from "../client.js";
+import type { ApprovalRule } from "../approvals.js";
 import { channelIdParam, type ToolFactory } from "../schemas.js";
 
 const canvasUrl = (canvasId: string) => `https://slack.com/docs/${canvasId}`;
@@ -154,4 +155,21 @@ export const canvasTools = (tool: ToolFactory) => [
       return { sections: data.sections ?? [] };
     },
   }),
+];
+
+/** `replace` overwrites existing canvas content; Slack offers no API to restore it. */
+export const canvasApprovals: ApprovalRule[] = [
+  {
+    toolName: "slack_canvas_edit",
+    check: ({ canvasId, operation, sectionId }) => {
+      if (operation !== "replace") return undefined;
+      return {
+        title: "Replace Slack canvas content",
+        description: sectionId
+          ? `Overwrite section ${sectionId} of canvas ${canvasId}. The previous section content cannot be restored.`
+          : `Overwrite the entire body of canvas ${canvasId}. The previous content cannot be restored.`,
+        target: `canvas ${canvasId}`,
+      };
+    },
+  },
 ];

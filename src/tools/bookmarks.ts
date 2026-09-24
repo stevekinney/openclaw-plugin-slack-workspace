@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 import { callSlack, resolveToken } from "../client.js";
+import type { ApprovalRule } from "../approvals.js";
 import { channelIdParam, type ToolFactory } from "../schemas.js";
 
 /** Slack's bookmark object, passed through as-is (id, title, link, emoji, ...). */
@@ -83,4 +84,16 @@ export const bookmarkTools = (tool: ToolFactory) => [
       return { removed: true, bookmarkId };
     },
   }),
+];
+
+/** Slack has no bookmark undo; a removed bookmark has to be re-added by hand. */
+export const bookmarkApprovals: ApprovalRule[] = [
+  {
+    toolName: "slack_bookmark_remove",
+    check: ({ channelId, bookmarkId }) => ({
+      title: "Remove Slack bookmark",
+      description: `Remove bookmark ${bookmarkId} from channel ${channelId}. This cannot be undone.`,
+      target: `channel ${channelId}`,
+    }),
+  },
 ];

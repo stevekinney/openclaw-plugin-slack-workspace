@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 import { callSlack, resolveToken } from "../client.js";
+import type { ApprovalRule } from "../approvals.js";
 import { blocksSchema, channelIdParam, threadTsParam, type ToolFactory } from "../schemas.js";
 
 export const schedulingTools = (tool: ToolFactory) => [
@@ -135,4 +136,16 @@ export const schedulingTools = (tool: ToolFactory) => [
       return { channelId, scheduledMessageId, cancelled: true };
     },
   }),
+];
+
+/** A cancelled scheduled message is gone; it cannot be restored, only rescheduled. */
+export const schedulingApprovals: ApprovalRule[] = [
+  {
+    toolName: "slack_scheduled_cancel",
+    check: ({ channelId, scheduledMessageId }) => ({
+      title: "Cancel scheduled Slack message",
+      description: `Cancel scheduled message ${scheduledMessageId} in channel ${channelId}. This cannot be undone.`,
+      target: `channel ${channelId}`,
+    }),
+  },
 ];
