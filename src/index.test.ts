@@ -79,6 +79,42 @@ describe("slack_post_table", () => {
     });
   });
 
+  it("rejects a table over Slack's 10,000-character aggregate limit, without calling Slack", async () => {
+    await withMockFetch(ok, async (calls) => {
+      await expect(
+        runTool("slack_post_table", {
+          ...target,
+          caption: "Notes",
+          columns: ["id", "note"],
+          // 2 header chars + 4 header chars + 100 × (3 + 97) = 10,006 characters.
+          rows: Array.from({ length: 100 }, (_, index) => [
+            String(index).padStart(3, "0"),
+            "x".repeat(97),
+          ]),
+        }),
+      ).rejects.toThrow(
+        "Table cells total 10006 characters; Slack caps a data_table at 10000. Trim long cells or split the rows across tables.",
+      );
+      expect(calls).toHaveLength(0);
+    });
+  });
+
+  it("accepts a table exactly at the 10,000-character aggregate limit", async () => {
+    await withMockFetch(ok, async (calls) => {
+      await runTool("slack_post_table", {
+        ...target,
+        caption: "Notes",
+        columns: ["id", "note"],
+        // Same as the over-limit table, with the first note 6 characters shorter.
+        rows: Array.from({ length: 100 }, (_, index) => [
+          String(index).padStart(3, "0"),
+          "x".repeat(index === 0 ? 91 : 97),
+        ]),
+      });
+      expect(calls).toHaveLength(1);
+    });
+  });
+
   it("posts a data_table with raw_number cells when widths match", async () => {
     await withMockFetch(ok, async (calls) => {
       const result = await runTool("slack_post_table", {
