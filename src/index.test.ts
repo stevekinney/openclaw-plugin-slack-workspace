@@ -288,6 +288,63 @@ describe("link unfurling on proactive posts", () => {
   });
 });
 
+describe("reply broadcast on structured posts", () => {
+  const thread = { ...target, threadTs: "1700000000.000100" };
+  const table = { ...thread, caption: "T", columns: ["a"], rows: [["1"]] };
+  const plan = { ...thread, title: "P", tasks: [{ title: "x", status: "pending" }] };
+  const chart = {
+    ...thread,
+    title: "C",
+    chartType: "pie",
+    segments: [{ label: "a", value: 1 }],
+  };
+
+  it.each([
+    ["slack_post_table", table],
+    ["slack_post_plan", plan],
+    ["slack_post_chart", chart],
+  ])("%s sends reply_broadcast when replyBroadcast is set", async (name, args) => {
+    await withMockFetch(ok, async (calls) => {
+      await runTool(name, { ...args, replyBroadcast: true });
+      expect(calls[0].method).toBe("chat.postMessage");
+      expect(calls[0].body).toMatchObject({
+        thread_ts: "1700000000.000100",
+        reply_broadcast: true,
+      });
+    });
+  });
+
+  it("omits reply_broadcast by default", async () => {
+    await withMockFetch(ok, async (calls) => {
+      await runTool("slack_post_table", table);
+      expect(calls[0].body).not.toHaveProperty("reply_broadcast");
+    });
+  });
+
+  it.each([
+    ["slack_post_table", { ...table, threadTs: undefined }],
+    ["slack_blocks_send", { ...target, text: "t", blocks: [{ type: "divider" }] }],
+  ])("%s omits reply_broadcast without threadTs", async (name, args) => {
+    await withMockFetch(ok, async (calls) => {
+      await runTool(name, { ...args, replyBroadcast: true });
+      expect(calls[0].method).toBe("chat.postMessage");
+      expect(calls[0].body).not.toHaveProperty("reply_broadcast");
+    });
+  });
+
+  it("does not send reply_broadcast to chat.update", async () => {
+    await withMockFetch(ok, async (calls) => {
+      await runTool("slack_post_table", {
+        ...table,
+        replyBroadcast: true,
+        updateTs: "1700000000.000200",
+      });
+      expect(calls[0].method).toBe("chat.update");
+      expect(calls[0].body).not.toHaveProperty("reply_broadcast");
+    });
+  });
+});
+
 describe("slack_schedule_message postAt bounds", () => {
   const now = new Date("2026-09-23T12:00:00Z");
   const nowSeconds = Math.floor(now.getTime() / 1000);
