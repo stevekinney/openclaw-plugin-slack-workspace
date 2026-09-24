@@ -8,8 +8,5 @@
     "outDir": "dist",
     "skipLibCheck": true
   },
-  "include": [
-    "src/index.ts",
-    "src/tool-metadata.ts"
-  ]
+  "include": ["src/**/*.ts"]
 }
