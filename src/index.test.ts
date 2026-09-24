@@ -47,6 +47,10 @@ describe("slack-workspace", () => {
       "slack_channel_kickoff",
       "slack_list_create",
       "slack_list_schema",
+      "slack_list_item_create",
+      "slack_list_item_update",
+      "slack_list_item_delete",
+      "slack_list_items_delete_multiple",
     ]);
   });
 

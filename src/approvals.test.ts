@@ -58,6 +58,12 @@ const gated: Array<[string, Record<string, unknown>, string]> = [
     "conversations.rename",
   ],
   ["slack_channel_kickoff", { name: "launch" }, "conversations.create"],
+  ["slack_list_item_delete", { listId: "F0LIST", itemId: "Rec0A" }, "slackLists.items.delete"],
+  [
+    "slack_list_items_delete_multiple",
+    { listId: "F0LIST", itemIds: ["Rec0A", "Rec0B"] },
+    "slackLists.items.deleteMultiple",
+  ],
 ];
 
 describe("approval registry", () => {
@@ -69,6 +75,8 @@ describe("approval registry", () => {
       "slack_channel_archive",
       "slack_channel_kickoff",
       "slack_channel_rename",
+      "slack_list_item_delete",
+      "slack_list_items_delete_multiple",
       "slack_scheduled_cancel",
     ]);
   });
@@ -125,6 +133,13 @@ describe("approval registry", () => {
       approvalFor("slack_scheduled_cancel", { channelId: "C0TEST", scheduledMessageId: "Q0TEST" })
         ?.description,
     ).toContain("Q0TEST");
+    expect(
+      approvalFor("slack_list_items_delete_multiple", { listId: "F0LIST", itemIds: ["Rec0A", "Rec0B"] }),
+    ).toMatchObject({ scope: { target: "list F0LIST" } });
+    expect(
+      approvalFor("slack_list_items_delete_multiple", { listId: "F0LIST", itemIds: ["Rec0A", "Rec0B"] })
+        ?.description,
+    ).toContain("Rec0A, Rec0B");
   });
 
   it.each(["append", "prepend", "insert_after", "insert_before", "rename"])("does not gate canvas %s", (operation) => {
