@@ -71,4 +71,6 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
   slack_assistant_set_title: idempotentWrite,
   // Replaces the thread's prompts wholesale, so repeating the call lands the same result.
   slack_assistant_suggest_prompts: idempotentWrite,
+  // Each call starts a new workflow run.
+  slack_workflow_trigger_run: write,
 };

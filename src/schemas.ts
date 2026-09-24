@@ -20,6 +20,12 @@ export const configSchema = Type.Object(
           "Slack user token (xoxp-) or a SecretRef. Required by search, which rejects bot tokens. Falls back to SLACK_USER_TOKEN.",
       }),
     ),
+    workflowTriggers: Type.Optional(
+      Type.Record(Type.String(), Type.Union([Type.String(), secretRefSchema]), {
+        description:
+          "Workflow Builder webhook trigger URLs (https://hooks.slack.com/triggers/...) by name, each a string or a SecretRef, e.g. {\"standup\": {source,provider,id}}. The URL is the credential; slack_workflow_trigger_run starts a workflow by name.",
+      }),
+    ),
     autoJoin: Type.Optional(
       Type.Boolean({
         description:

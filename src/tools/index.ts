@@ -9,6 +9,7 @@ import { listTools } from "./lists.js";
 import { messagingTools } from "./messaging.js";
 import { schedulingTools } from "./scheduling.js";
 import { searchTools } from "./search.js";
+import { workflowTools } from "./workflows.js";
 
 /** Every tool this plugin registers, in manifest `contracts.tools` order. */
 export const tools = [
@@ -22,4 +23,5 @@ export const tools = [
   ...listTools(defineTool),
   ...fileTools(defineTool),
   ...assistantTools(defineTool),
+  ...workflowTools(defineTool),
 ];

@@ -5,6 +5,8 @@ export type SlackResponse = Record<string, unknown> & { ok?: boolean; error?: st
 export type PluginConfig = {
   botToken?: string | { id?: string };
   userToken?: string | { id?: string };
+  /** Workflow Builder webhook trigger URLs by name; each URL is a secret. */
+  workflowTriggers?: Record<string, string | { id?: string }>;
   /** Join a public channel and retry when a bot-token call hits `not_in_channel`. Default true. */
   autoJoin?: boolean;
   /** Channel IDs never to auto-join. */

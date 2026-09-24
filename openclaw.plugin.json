@@ -1,7 +1,7 @@
 {
   "id": "slack-workspace",
   "name": "Slack Workspace",
-  "description": "Slack workspace tools: identity and message scheduling, search, structured messaging (tables, plans, charts, rich text), raw Block Kit messages, canvases, channel bookmarks, public-channel lifecycle (create, archive, rename, topic, purpose, invite, join, leave, one-call kickoff), Slack Lists, and file uploads.",
+  "description": "Slack workspace tools: identity and message scheduling, search, structured messaging (tables, plans, charts, rich text), raw Block Kit messages, canvases, channel bookmarks, public-channel lifecycle (create, archive, rename, topic, purpose, invite, join, leave, one-call kickoff), Slack Lists, file uploads, and Workflow Builder webhook triggers.",
   "version": "0.1.0",
   "configSchema": {
     "type": "object",
@@ -58,6 +58,37 @@
         ],
         "description": "Slack user token (xoxp-) or a SecretRef. Required by search, which rejects bot tokens. Falls back to SLACK_USER_TOKEN."
       },
+      "workflowTriggers": {
+        "type": "object",
+        "patternProperties": {
+          "^.*$": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "source",
+                  "id"
+                ],
+                "properties": {
+                  "source": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "description": "Workflow Builder webhook trigger URLs (https://hooks.slack.com/triggers/...) by name, each a string or a SecretRef, e.g. {\"standup\": {source,provider,id}}. The URL is the credential; slack_workflow_trigger_run starts a workflow by name."
+      },
       "autoJoin": {
         "type": "boolean",
         "description": "When a bot-token call fails with not_in_channel on a public channel, join it once and retry. Default true."
@@ -92,6 +123,11 @@
         },
         {
           "path": "userToken",
+          "expected": "string",
+          "ownerKind": "capability"
+        },
+        {
+          "path": "workflowTriggers.*",
           "expected": "string",
           "ownerKind": "capability"
         }
@@ -151,7 +187,8 @@
       "slack_list_from_thread",
       "slack_file_upload",
       "slack_assistant_set_title",
-      "slack_assistant_suggest_prompts"
+      "slack_assistant_suggest_prompts",
+      "slack_workflow_trigger_run"
     ]
   },
   "toolMetadata": {
@@ -204,14 +241,14 @@
         "messaging"
       ]
     },
-    "slack_post_chart": {
+    "slack_post_rich_text": {
       "sideEffecting": true,
       "replaySafe": false,
       "profiles": [
         "messaging"
       ]
     },
-    "slack_post_rich_text": {
+    "slack_post_chart": {
       "sideEffecting": true,
       "replaySafe": false,
       "profiles": [
@@ -494,6 +531,13 @@
     "slack_assistant_suggest_prompts": {
       "sideEffecting": true,
       "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_workflow_trigger_run": {
+      "sideEffecting": true,
+      "replaySafe": false,
       "profiles": [
         "messaging"
       ]

@@ -44,9 +44,13 @@ describe("openclaw.plugin.json", () => {
     if (scratch) await rm(scratch, { recursive: true, force: true });
   });
 
-  it("declares configContracts.secretInputs for botToken and userToken", () => {
+  it("declares configContracts.secretInputs for botToken, userToken, and each workflow trigger", () => {
     const paths = committed.configContracts?.secretInputs?.paths ?? [];
-    expect(paths.map((entry: { path: string }) => entry.path)).toEqual(["botToken", "userToken"]);
+    expect(paths.map((entry: { path: string }) => entry.path)).toEqual([
+      "botToken",
+      "userToken",
+      "workflowTriggers.*",
+    ]);
   });
 
   it("declares the bundled skills directory", () => {
