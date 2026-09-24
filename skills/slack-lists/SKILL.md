@@ -15,6 +15,10 @@ Read rows back with `slack_list_items_list` (pass `archived: true` for archived 
 or one row and its subtasks with `slack_list_item_info`.
 Share a list with `slack_list_access_set` (channels get read or write; users can also
 get owner) and take access away with `slack_list_access_delete`.
+Turn a thread's action items into rows with `slack_list_from_thread`. It makes a new
+to-do list or appends to `listId`. If you've already read the thread, pass `items`
+yourself; the built-in extraction only catches checklists, `TODO:` lines, and bullets
+under an "Action items:" heading.
 
 ## Finding a list you didn't create
 

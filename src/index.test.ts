@@ -55,6 +55,7 @@ describe("slack-workspace", () => {
       "slack_list_item_info",
       "slack_list_access_set",
       "slack_list_access_delete",
+      "slack_list_from_thread",
     ]);
   });
 
