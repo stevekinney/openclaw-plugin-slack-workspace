@@ -20,12 +20,13 @@ const READ_ONLY = [
   "slack_search",
   "slack_scheduled_list",
   "slack_canvas_sections",
+  "slack_canvas_list",
   "slack_bookmark_list",
 ];
 
 describe("outputSchema", () => {
-  it("is declared by all 31 tools", () => {
-    expect(tools).toHaveLength(31);
+  it("is declared by all 32 tools", () => {
+    expect(tools).toHaveLength(32);
     for (const tool of tools) expect(tool.outputSchema, tool.name).toBeDefined();
   });
 });

@@ -30,6 +30,7 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
   slack_canvas_create: write,
   slack_canvas_edit: write,
   slack_canvas_sections: read,
+  slack_canvas_list: read,
   slack_canvas_access_set: idempotentWrite,
   slack_canvas_access_delete: idempotentWrite,
   slack_canvas_delete: write,
