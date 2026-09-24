@@ -4,6 +4,7 @@ import {
   blocksSchema,
   channelIdParam,
   postResultSchema,
+  replyBroadcastParam,
   targetParams,
   threadTsParam,
   unfurlParams,
@@ -79,6 +80,7 @@ async function postOrUpdate(
     text: string;
     blocks: unknown[];
     threadTs?: string;
+    replyBroadcast?: boolean;
     updateTs?: string;
     unfurlLinks?: boolean;
     unfurlMedia?: boolean;
@@ -101,6 +103,7 @@ async function postOrUpdate(
     };
   }
   if (args.threadTs) body.thread_ts = args.threadTs;
+  if (args.replyBroadcast) body.reply_broadcast = true;
   body.unfurl_links = args.unfurlLinks ?? false;
   body.unfurl_media = args.unfurlMedia ?? false;
   const data = await callSlack("chat.postMessage", token, body, context);
@@ -136,7 +139,7 @@ export const messagingTools = (tool: ToolFactory) => [
     }),
     outputSchema: postResultSchema,
     async execute(
-      { channelId, caption, columns, rows, pageSize, threadTs, updateTs, unfurlLinks, unfurlMedia },
+      { channelId, caption, columns, rows, pageSize, threadTs, replyBroadcast, updateTs, unfurlLinks, unfurlMedia },
       config,
       context,
     ) {
@@ -170,6 +173,7 @@ export const messagingTools = (tool: ToolFactory) => [
           text: tableFallback(caption, columns, rows),
           blocks: [table],
           threadTs,
+          replyBroadcast,
           updateTs,
           unfurlLinks,
           unfurlMedia,
@@ -211,7 +215,7 @@ export const messagingTools = (tool: ToolFactory) => [
     }),
     outputSchema: postResultSchema,
     async execute(
-      { channelId, title, tasks, threadTs, updateTs, unfurlLinks, unfurlMedia },
+      { channelId, title, tasks, threadTs, replyBroadcast, updateTs, unfurlLinks, unfurlMedia },
       config,
       context,
     ) {
@@ -238,6 +242,7 @@ export const messagingTools = (tool: ToolFactory) => [
           text: `${title} — ${done}/${tasks.length} complete`,
           blocks: [plan],
           threadTs,
+          replyBroadcast,
           updateTs,
           unfurlLinks,
           unfurlMedia,
@@ -347,6 +352,7 @@ export const messagingTools = (tool: ToolFactory) => [
           text,
           blocks: [{ type: "data_visualization", title, chart }],
           threadTs: args.threadTs,
+          replyBroadcast: args.replyBroadcast,
           updateTs: args.updateTs,
           unfurlLinks: args.unfurlLinks,
           unfurlMedia: args.unfurlMedia,
@@ -369,11 +375,7 @@ export const messagingTools = (tool: ToolFactory) => [
       }),
       blocks: blocksSchema,
       threadTs: threadTsParam,
-      replyBroadcast: Type.Optional(
-        Type.Boolean({
-          description: "With threadTs, also surface the reply in the parent channel.",
-        }),
-      ),
+      replyBroadcast: replyBroadcastParam,
       ...unfurlParams,
     }),
     outputSchema: Type.Object(

@@ -66,10 +66,18 @@ export const unfurlParams = {
   ),
 };
 
+export const replyBroadcastParam = Type.Optional(
+  Type.Boolean({
+    description:
+      "With threadTs, also surface the reply in the parent channel. Ignored with updateTs.",
+  }),
+);
+
 /** Where a structured post lands: a channel, optionally a thread, optionally in place. */
 export const targetParams = {
   channelId: channelIdParam(),
   threadTs: threadTsParam,
+  replyBroadcast: replyBroadcastParam,
   updateTs: Type.Optional(
     Type.String({
       description:
