@@ -249,10 +249,37 @@ export const canvasTools = (tool: ToolFactory) => [
       return { sections: sections.map((section) => ({ id: String(section.id ?? "") })) };
     },
   }),
+
+  tool({
+    name: "slack_canvas_delete",
+    label: "Delete Slack canvas",
+    description:
+      "Delete a standalone Slack canvas entirely, e.g. a scratch or status canvas that is no longer needed. This cannot be undone. To remove one section instead, use slack_canvas_edit with operation delete.",
+    parameters: Type.Object({
+      canvasId: Type.String({ description: "Canvas ID, e.g. F0166DCSTS7." }),
+    }),
+    outputSchema: Type.Object(
+      { deleted: Type.Literal(true), canvasId: Type.String() },
+      { additionalProperties: false },
+    ),
+    async execute({ canvasId }, config, context) {
+      context.signal?.throwIfAborted();
+      await callSlack("canvases.delete", resolveToken(config), { canvas_id: canvasId }, context);
+      return { deleted: true as const, canvasId };
+    },
+  }),
 ];
 
 /** `replace` overwrites and `delete` removes canvas content; Slack offers no API to restore it. */
 export const canvasApprovals: ApprovalRule[] = [
+  {
+    toolName: "slack_canvas_delete",
+    check: ({ canvasId }) => ({
+      title: "Delete Slack canvas",
+      description: `Delete canvas ${canvasId} entirely. The canvas and its content cannot be restored.`,
+      target: `canvas ${canvasId}`,
+    }),
+  },
   {
     toolName: "slack_canvas_edit",
     check: ({ canvasId, operation, sectionId }) => {

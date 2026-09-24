@@ -101,6 +101,8 @@ const ERROR_HINTS: Record<string, string> = {
     "free workspaces cannot create standalone canvases; use a channel canvas instead",
   channel_canvas_already_exists: "this channel already has a canvas; edit that one instead",
   canvas_too_large: "the canvas exceeds Slack's size limit; split the content up",
+  canvas_not_found: "no canvas with this ID exists, or it was already deleted",
+  access_denied: "this token lacks permission on the canvas; editing or deleting it needs write or owner access",
   canvas_editing_locked: "the canvas is locked for editing; try again shortly",
   invalid_primary_column: "a list's primary column must be a text column",
   over_column_maximum: "the list has more columns than Slack allows",

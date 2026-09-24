@@ -21,7 +21,7 @@ Every tool declares an `outputSchema`. When a tool returns data from Slack, the 
 
 ## Approvals
 
-A `before_tool_call` hook asks a human to approve destructive calls before they reach Slack: `slack_canvas_edit` with `operation: "replace"` or `"delete"`, `slack_bookmark_remove`, `slack_scheduled_cancel`, `slack_channel_archive`, `slack_channel_rename`, and every `slack_channel_kickoff`. Reviewers get `allow-once` or `deny` only; the plugin doesn't persist trust, so it never offers `allow-always`. The rules live in `src/approvals.ts`. When you add an irreversible or disruptive tool, register its rule there in the same change.
+A `before_tool_call` hook asks a human to approve destructive calls before they reach Slack: `slack_canvas_edit` with `operation: "replace"` or `"delete"`, `slack_canvas_delete`, `slack_bookmark_remove`, `slack_scheduled_cancel`, `slack_channel_archive`, `slack_channel_rename`, and every `slack_channel_kickoff`. Reviewers get `allow-once` or `deny` only; the plugin doesn't persist trust, so it never offers `allow-always`. The rules live in `src/approvals.ts`. When you add an irreversible or disruptive tool, register its rule there in the same change.
 
 Archive and rename also require an explicit `confirm: true` argument. The schema has no default for it, and the tool refuses the call before contacting Slack without it. That guard still holds in cron jobs and other automation where no one is around to approve.
 
