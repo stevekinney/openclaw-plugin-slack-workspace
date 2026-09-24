@@ -150,7 +150,8 @@
       "slack_list_access_delete",
       "slack_list_from_thread",
       "slack_file_upload",
-      "slack_assistant_set_title"
+      "slack_assistant_set_title",
+      "slack_assistant_suggest_prompts"
     ]
   },
   "toolMetadata": {
@@ -484,6 +485,13 @@
       ]
     },
     "slack_assistant_set_title": {
+      "sideEffecting": true,
+      "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_assistant_suggest_prompts": {
       "sideEffecting": true,
       "replaySafe": true,
       "profiles": [

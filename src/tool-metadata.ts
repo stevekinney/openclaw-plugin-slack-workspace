@@ -69,4 +69,6 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
   slack_file_upload: write,
   // Overwrites the title with the given string; repeating the same call lands the same result.
   slack_assistant_set_title: idempotentWrite,
+  // Replaces the thread's prompts wholesale, so repeating the call lands the same result.
+  slack_assistant_suggest_prompts: idempotentWrite,
 };

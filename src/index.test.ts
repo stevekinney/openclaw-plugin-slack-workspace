@@ -61,6 +61,7 @@ describe("slack-workspace", () => {
       "slack_list_from_thread",
       "slack_file_upload",
       "slack_assistant_set_title",
+      "slack_assistant_suggest_prompts",
     ]);
   });
 
