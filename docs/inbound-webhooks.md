@@ -47,4 +47,4 @@ OpenClaw isn't in the path, so no agent reads, triages, or replies to the alert.
 ## Not the same thing
 
 - **Workflow Builder webhook triggers** (`hooks.slack.com/triggers/...`) start a Slack workflow. This plugin's `slack_workflow_trigger_run` tool calls them. They're outbound from OpenClaw, not inbound to it.
-- **Internal hooks** (`HOOK.md` handlers, `docs/automation/hooks.md`) react to OpenClaw's own agent events and have no HTTP surface.
+- **Internal hooks** (`HOOK.md` handlers, described in `docs/automation/hooks.md` in the `openclaw` package, not this repo) react to OpenClaw's own agent events and have no HTTP surface.
