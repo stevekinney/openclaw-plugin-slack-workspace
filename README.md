@@ -1,6 +1,6 @@
 # Slack Workspace
 
-Simple OpenClaw tool plugin.
+OpenClaw plugin that registers Slack workspace tools and hooks with `definePluginEntry`.
 
 ## Build
 
@@ -10,6 +10,10 @@ npm run plugin:build
 npm run plugin:validate
 npm test
 ```
+
+## Manifest
+
+`openclaw.plugin.json` is hand-authored. `npm run plugin:build` refreshes only the fields OpenClaw derives from the entry (id, name, description, `configSchema`, `contracts.tools`) and keeps the rest. Everything else (`configContracts`, `skills`, `toolMetadata`) is maintained by hand; when you add a tool, add its `toolMetadata` entry to both the manifest and `src/tool-metadata.ts`, which a test compares against it.
 
 ## CI
 

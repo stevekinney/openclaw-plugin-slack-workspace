@@ -1,23 +1,52 @@
-import { defineToolPlugin } from "openclaw/plugin-sdk/tool-plugin";
+import { buildJsonPluginConfigSchema, definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import {
+  toolPluginMetadataSymbol,
+  type ToolPluginMetadata,
+} from "openclaw/plugin-sdk/tool-plugin";
+import type { TSchema } from "typebox";
+import { beforeToolCall } from "./hooks.js";
 import { configSchema } from "./schemas.js";
-import { bookmarkTools } from "./tools/bookmarks.js";
-import { canvasTools } from "./tools/canvases.js";
-import { identityTools } from "./tools/identity.js";
-import { messagingTools } from "./tools/messaging.js";
-import { schedulingTools } from "./tools/scheduling.js";
-import { searchTools } from "./tools/search.js";
+import { registerTools } from "./tool.js";
+import { tools } from "./tools/index.js";
 
-export default defineToolPlugin({
-  id: "slack-workspace",
-  name: "Slack Workspace",
-  description: "Create and edit Slack canvases and manage channel bookmarks.",
-  configSchema,
-  tools: (tool) => [
-    ...identityTools(tool),
-    ...searchTools(tool),
-    ...schedulingTools(tool),
-    ...messagingTools(tool),
-    ...canvasTools(tool),
-    ...bookmarkTools(tool),
-  ],
+/** TypeBox schemas are plain JSON Schema objects; the SDK types them separately. */
+const jsonSchema = (schema: TSchema) => schema as unknown as ToolPluginMetadata["configSchema"];
+
+const id = "slack-workspace";
+const name = "Slack Workspace";
+const description = "Create and edit Slack canvases and manage channel bookmarks.";
+const pluginConfigSchema = buildJsonPluginConfigSchema(jsonSchema(configSchema));
+
+const entry = definePluginEntry({
+  id,
+  name,
+  description,
+  configSchema: pluginConfigSchema,
+  register(api) {
+    registerTools(api, tools);
+    const [first, ...rest] = tools.map((tool) => tool.name);
+    api.on("before_tool_call", beforeToolCall, { matcher: [first, ...rest] });
+  },
 });
+
+// `openclaw plugins build`/`validate` only read entries that carry authoring metadata.
+// Attach it the way the SDK's own `defineFeaturePlugin` does, so the CLI keeps
+// checking the hand-authored manifest's id, configSchema, and contracts.tools
+// against the code.
+const metadata: ToolPluginMetadata = {
+  id,
+  name,
+  description,
+  activation: { onStartup: true },
+  configSchema: pluginConfigSchema.jsonSchema ?? jsonSchema(configSchema),
+  tools: tools.map((tool) => ({
+    name: tool.name,
+    label: tool.label ?? tool.name,
+    description: tool.description,
+    parameters: jsonSchema(tool.parameters),
+    ...(tool.outputSchema ? { outputSchema: jsonSchema(tool.outputSchema) } : {}),
+  })),
+};
+Object.defineProperty(entry, toolPluginMetadataSymbol, { value: metadata, enumerable: false });
+
+export default entry;

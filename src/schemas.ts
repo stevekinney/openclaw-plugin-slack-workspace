@@ -1,5 +1,4 @@
 import { Type } from "typebox";
-import type { DefineToolPluginOptions } from "openclaw/plugin-sdk/tool-plugin";
 
 const secretRefSchema = Type.Object({
   source: Type.String(),
@@ -22,11 +21,8 @@ export const configSchema = Type.Object({
   ),
 });
 
-/**
- * The `tool` helper `defineToolPlugin` hands to its `tools` callback, typed for this
- * plugin's config. Each domain module takes one and returns its tool definitions.
- */
-export type ToolFactory = Parameters<DefineToolPluginOptions<typeof configSchema>["tools"]>[0];
+/** Each domain module takes the `defineTool` helper and returns its tool definitions. */
+export type { ToolFactory } from "./tool.js";
 
 export const CHANNEL_ID_DESCRIPTION = "Channel or DM ID, e.g. C0C42LZQZGQ or D0B9DMSCL58.";
 

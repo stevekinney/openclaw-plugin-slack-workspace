@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { cp, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,46 +18,42 @@ describe("package.json", () => {
   });
 });
 
-// `openclaw plugins build` only preserves configContracts/skills if they are already
-// in the manifest; it never generates them. Rebuild from a manifest stripped of every
-// field scripts/patch-manifest.mjs owns, in a scratch copy of the package, and check
-// the full `plugin:build` pipeline puts them back.
-describe("plugin:build", () => {
+// openclaw.plugin.json is hand-authored. `openclaw plugins build` regenerates only
+// the fields it derives from the entry (id, name, description, configSchema,
+// contracts.tools) and keeps everything else, so the hand-authored fields must be
+// present and a bare rebuild must leave the committed manifest untouched.
+describe("openclaw.plugin.json", () => {
   let scratch: string;
   let committed: Record<string, any>;
-  let built: Record<string, any>;
+  let rebuilt: Record<string, any>;
 
   beforeAll(async () => {
     scratch = await mkdtemp(join(tmpdir(), "slack-workspace-manifest-"));
-    for (const entry of ["package.json", "skills", "scripts"]) {
+    for (const entry of ["package.json", "skills", "openclaw.plugin.json"]) {
       await cp(join(ROOT, entry), join(scratch, entry), { recursive: true });
     }
     await symlink(join(ROOT, "node_modules"), join(scratch, "node_modules"), "dir");
 
     committed = await readJson(join(ROOT, "openclaw.plugin.json"));
-    const { configContracts, skills, toolMetadata, ...generated } = committed;
-    await writeFile(join(scratch, "openclaw.plugin.json"), JSON.stringify(generated, null, 2));
-
     await run(bin("tsc"), ["-p", join(ROOT, "tsconfig.build.json"), "--outDir", join(scratch, "dist")]);
     await run(bin("openclaw"), ["plugins", "build", "--root", scratch, "--entry", "./dist/index.js"]);
-    await run(process.execPath, [join(scratch, "scripts", "patch-manifest.mjs")]);
-    built = await readJson(join(scratch, "openclaw.plugin.json"));
+    rebuilt = await readJson(join(scratch, "openclaw.plugin.json"));
   }, 120_000);
 
   afterAll(async () => {
     if (scratch) await rm(scratch, { recursive: true, force: true });
   });
 
-  it("restores configContracts.secretInputs for botToken and userToken", () => {
-    const paths = built.configContracts?.secretInputs?.paths ?? [];
+  it("declares configContracts.secretInputs for botToken and userToken", () => {
+    const paths = committed.configContracts?.secretInputs?.paths ?? [];
     expect(paths.map((entry: { path: string }) => entry.path)).toEqual(["botToken", "userToken"]);
   });
 
-  it("restores the bundled skills directory", () => {
-    expect(built.skills).toEqual(["./skills"]);
+  it("declares the bundled skills directory", () => {
+    expect(committed.skills).toEqual(["./skills"]);
   });
 
-  it("reproduces the committed manifest exactly", () => {
-    expect(built).toEqual(committed);
+  it("is unchanged by a bare openclaw plugins build", () => {
+    expect(rebuilt).toEqual(committed);
   });
 });
