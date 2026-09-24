@@ -1,7 +1,7 @@
 {
   "id": "slack-workspace",
   "name": "Slack Workspace",
-  "description": "Slack workspace tools: identity and message scheduling, search, structured messaging (tables, plans, charts, rich text), raw Block Kit messages, canvases, channel bookmarks, public-channel lifecycle (create, archive, rename, topic, purpose, invite, join, leave, one-call kickoff), Slack Lists, file uploads, and Workflow Builder webhook triggers.",
+  "description": "Slack workspace tools: identity and message scheduling, search, structured messaging (tables, plans, charts, rich text), raw Block Kit messages, canvases, channel bookmarks, public-channel lifecycle (create, archive, rename, topic, purpose, invite, join, leave, one-call kickoff), Slack Lists, file uploads, Workflow Builder webhook triggers, and read-only user group lookups.",
   "version": "0.1.0",
   "configSchema": {
     "type": "object",
@@ -191,7 +191,9 @@
       "slack_file_upload",
       "slack_assistant_set_title",
       "slack_assistant_suggest_prompts",
-      "slack_workflow_trigger_run"
+      "slack_workflow_trigger_run",
+      "slack_usergroup_list",
+      "slack_usergroup_members"
     ]
   },
   "toolMetadata": {
@@ -562,6 +564,20 @@
     "slack_workflow_trigger_run": {
       "sideEffecting": true,
       "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_usergroup_list": {
+      "sideEffecting": false,
+      "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_usergroup_members": {
+      "sideEffecting": false,
+      "replaySafe": true,
       "profiles": [
         "messaging"
       ]

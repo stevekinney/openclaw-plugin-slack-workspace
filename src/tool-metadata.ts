@@ -77,4 +77,6 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
   slack_assistant_suggest_prompts: idempotentWrite,
   // Each call starts a new workflow run.
   slack_workflow_trigger_run: write,
+  slack_usergroup_list: read,
+  slack_usergroup_members: read,
 };

@@ -84,6 +84,8 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind | "none"; scopes: st
   slack_assistant_suggest_prompts: { token: "bot", scopes: ["assistant:write"] },
   // POSTs to a configured webhook URL; the URL is the credential, not a Slack token.
   slack_workflow_trigger_run: { token: "none", scopes: [] },
+  slack_usergroup_list: { token: "bot", scopes: ["usergroups:read"] },
+  slack_usergroup_members: { token: "bot", scopes: ["usergroups:read"] },
 };
 
 export type TokenAudit = {
