@@ -68,6 +68,14 @@ without parsing its text. Slack silently drops metadata whose `eventType` isn't
 registered under the app manifest's `metadata.event_subscriptions`: the post still
 succeeds, just without the metadata.
 
+To find a stamped card again, call `slack_message_get` with the `channelId` and
+`eventType`, plus `matchPayload` (e.g. `{ "taskId": "T-1" }`) to pick one card.
+It returns matches newest first, each with the `ts` to pass as `updateTs`, so you
+don't need to remember timestamps. Pass `threadTs` to search one thread. The tool
+reads history each time you call it. Slack doesn't push anything when metadata
+changes. If `truncated` is true, it stopped before the end of the history. Narrow
+the search with `oldest`/`latest` or raise `maxPages`.
+
 ## Raw blocks
 
 `slack_blocks_send` passes `blocks` to Slack verbatim. `text` is required — it is the

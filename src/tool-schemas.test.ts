@@ -25,11 +25,12 @@ const READ_ONLY = [
   "slack_list_schema",
   "slack_list_items_list",
   "slack_list_item_info",
+  "slack_message_get",
 ];
 
 describe("outputSchema", () => {
-  it("is declared by all 43 tools", () => {
-    expect(tools).toHaveLength(43);
+  it("is declared by all 44 tools", () => {
+    expect(tools).toHaveLength(44);
     for (const tool of tools) expect(tool.outputSchema, tool.name).toBeDefined();
   });
 });

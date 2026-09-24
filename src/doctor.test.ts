@@ -24,6 +24,7 @@ const BOT_SCOPES = [
   "files:read",
   "lists:read",
   "lists:write",
+  "metadata.message:read",
 ];
 const USER_SCOPES = ["search:read"];
 
@@ -74,6 +75,7 @@ describe("auditScopes", () => {
           "files:read",
           "lists:read",
           "lists:write",
+          "metadata.message:read",
         ],
       });
       // Only the read-only auth.test, once per token.
