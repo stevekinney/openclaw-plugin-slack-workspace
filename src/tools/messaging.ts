@@ -25,6 +25,84 @@ const richText = (text: string) => ({
 const escapeText = (text: string) =>
   text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+/** One block of a structured message; `slack_post_rich_text` compiles these to rich_text. */
+const richTextSectionSchema = Type.Union([
+  Type.Object(
+    {
+      type: Type.Union([Type.Literal("paragraph"), Type.Literal("quote"), Type.Literal("code")], {
+        description: "`paragraph` (plain text), `quote` (indented block quote), or `code` (preformatted block, verbatim).",
+      }),
+      text: Type.String({
+        minLength: 1,
+        description: "Section text. In paragraph and quote, `backticks` mark inline code.",
+      }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      type: Type.Union([Type.Literal("bullet_list"), Type.Literal("ordered_list")], {
+        description: "`bullet_list` (•) or `ordered_list` (1. 2. 3.).",
+      }),
+      items: Type.Array(Type.String({ minLength: 1 }), {
+        minItems: 1,
+        maxItems: 100,
+        description: "List items in order. `backticks` mark inline code.",
+      }),
+    },
+    { additionalProperties: false },
+  ),
+]);
+
+type RichTextSection = Static<typeof richTextSectionSchema>;
+
+/** Split text on `backtick` spans into rich_text text elements, styling the spans as code. */
+const inlineElements = (text: string) =>
+  text
+    .split(/`([^`\n]+)`/)
+    .flatMap((part, index) => {
+      if (part === "") return [];
+      // split() puts captured spans at odd indexes.
+      return [index % 2 ? { type: "text", text: part, style: { code: true } } : { type: "text", text: part }];
+    });
+
+const richTextElement = (section: RichTextSection) => {
+  const listItems = (items: string[]) =>
+    items.map((item) => ({ type: "rich_text_section", elements: inlineElements(item) }));
+  switch (section.type) {
+    case "paragraph":
+      return { type: "rich_text_section", elements: inlineElements(section.text) };
+    case "quote":
+      // Unlike a list, a quote holds inline elements directly, not sections.
+      return { type: "rich_text_quote", elements: inlineElements(section.text) };
+    case "code":
+      return { type: "rich_text_preformatted", elements: [{ type: "text", text: section.text }] };
+    case "bullet_list":
+      return { type: "rich_text_list", style: "bullet", elements: listItems(section.items) };
+    case "ordered_list":
+      return { type: "rich_text_list", style: "ordered", elements: listItems(section.items) };
+  }
+};
+
+/** Plain-text rendering of the sections; content is escaped, the `>` quote marker is not. */
+const richTextFallback = (sections: RichTextSection[]) =>
+  sections
+    .map((section) => {
+      switch (section.type) {
+        case "paragraph":
+          return escapeText(section.text);
+        case "quote":
+          return `> ${escapeText(section.text)}`;
+        case "code":
+          return `\`\`\`${escapeText(section.text)}\`\`\``;
+        case "bullet_list":
+          return section.items.map((item) => `• ${escapeText(item)}`).join("\n");
+        case "ordered_list":
+          return section.items.map((item, index) => `${index + 1}. ${escapeText(item)}`).join("\n");
+      }
+    })
+    .join("\n");
+
 /** Show the first `limit` items, then note how many were cut. */
 const truncated = (items: string[], limit: number, noun = "") =>
   items.length > limit
@@ -288,6 +366,59 @@ export const messagingTools = (tool: ToolFactory) => [
           channelId,
           text: `${title} — ${done}/${tasks.length} complete`,
           blocks: [plan],
+          threadTs,
+          replyBroadcast,
+          updateTs,
+          unfurlLinks,
+          unfurlMedia,
+          metadata,
+        },
+        context,
+      );
+    },
+  }),
+
+  tool({
+    name: "slack_post_rich_text",
+    label: "Post Slack rich text",
+    description:
+      "Post formatted text to Slack as a native rich_text block: paragraphs, real bulleted and numbered lists, block quotes, and code blocks. Pass a flat list of sections and the nested rich_text JSON is built for you. Use instead of hand-writing rich_text through slack_blocks_send.",
+    parameters: Type.Object({
+      ...targetParams,
+      sections: Type.Array(richTextSectionSchema, {
+        minItems: 1,
+        maxItems: 50,
+        description:
+          "Sections in reading order, e.g. [{\"type\":\"paragraph\",\"text\":\"Done:\"},{\"type\":\"bullet_list\",\"items\":[\"api\",\"web\"]}].",
+      }),
+      text: Type.Optional(
+        Type.String({
+          description:
+            "Notification and screen-reader fallback. Defaults to a plain-text rendering of the sections.",
+        }),
+      ),
+    }),
+    outputSchema: postResultSchema,
+    async execute(
+      { channelId, sections, text, threadTs, replyBroadcast, updateTs, unfurlLinks, unfurlMedia, metadata },
+      config,
+      context,
+    ) {
+      context.signal?.throwIfAborted();
+      // Slack rejects an empty text element with a bare invalid_blocks; fail here with the section named.
+      sections.forEach((section, index) => {
+        const content = "items" in section ? section.items : [(section as { text?: string }).text];
+        if (!content?.length || content.some((value) => !value)) {
+          const field = section.type.endsWith("_list") ? "a non-empty `items` array" : "non-empty `text`";
+          throw new Error(`Section ${index} (${section.type}) needs ${field}.`);
+        }
+      });
+      return postOrUpdate(
+        config,
+        {
+          channelId,
+          text: text ?? richTextFallback(sections),
+          blocks: [{ type: "rich_text", elements: sections.map(richTextElement) }],
           threadTs,
           replyBroadcast,
           updateTs,

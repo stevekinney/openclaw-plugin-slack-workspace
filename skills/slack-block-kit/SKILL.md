@@ -16,9 +16,10 @@ content has shape, post the shape.
 | Rows and columns, any comparison | `slack_post_table` |
 | Steps, checklist, progress on multi-step work | `slack_post_plan` |
 | Numbers worth seeing — counts, trends, breakdowns | `slack_post_chart` |
+| Prose with real bullet or numbered lists, quotes, code blocks | `slack_post_rich_text` |
 | Anything else structured | `slack_blocks_send` |
 
-The first three take plain values and build the Block Kit JSON for you. Reach for
+The first four take plain values and build the Block Kit JSON for you. Reach for
 `slack_blocks_send` only when none of them fit — it takes raw blocks and expects you
 to know the schema.
 
@@ -45,15 +46,21 @@ splitting and text fallback here. Two copies of that logic will drift. Keep
 these tools to what `presentation` can't do, and send everything else through
 core.
 
+`slack_post_rich_text` takes a flat list of `sections`, each
+`{ type: "paragraph" | "quote" | "code", text }` or
+`{ type: "bullet_list" | "ordered_list", items: [...] }`, and builds one `rich_text`
+block. Wrap spans in `backticks` for inline code in paragraphs, quotes, and list
+items; `code` sections are posted verbatim.
+
 ## Keep one card current
 
-All four tools accept `updateTs`. Post once, keep the returned `ts`, then pass it as
+All five tools accept `updateTs`. Post once, keep the returned `ts`, then pass it as
 `updateTs` to rewrite that message in place. A six-step task should be one card that
 changes, not six messages.
 
 ## Link previews
 
-New posts from all four tools set `unfurl_links` and `unfurl_media` to `false`,
+New posts from all five tools set `unfurl_links` and `unfurl_media` to `false`,
 matching the Slack channel plugin's replies, so a URL in a table cell or plan step
 doesn't expand into a preview. Pass `unfurlLinks: true` or `unfurlMedia: true` when
 you want the preview. Both are ignored with `updateTs`: an edit keeps the original
@@ -61,7 +68,7 @@ post's unfurl behavior.
 
 ## Message metadata
 
-All four tools and `slack_blocks_update` accept an optional
+All five tools and `slack_blocks_update` accept an optional
 `metadata: { eventType, eventPayload }`, sent as Slack's `metadata` field. Use it to
 stamp a card with a machine-readable id (task id, revision) so it can be found later
 without parsing its text. Slack silently drops metadata whose `eventType` isn't
