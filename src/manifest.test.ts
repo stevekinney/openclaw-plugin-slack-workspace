@@ -16,6 +16,39 @@ describe("package.json", () => {
     const pkg = await readJson(join(ROOT, "package.json"));
     expect(pkg.devDependencies.openclaw).toBe(pkg.openclaw.build.openclawVersion);
   });
+
+  it("ships the plugin artwork in the published package", async () => {
+    const pkg = await readJson(join(ROOT, "package.json"));
+    expect(pkg.files).toContain("assets");
+  });
+});
+
+// OpenClaw discovers artwork at fixed paths; no manifest field points at it.
+// See node_modules/openclaw/docs/plugins/manifest/surfaces.md.
+describe("plugin artwork", () => {
+  it("ships a square PNG at assets/icon.png", async () => {
+    const png = await readFile(join(ROOT, "assets", "icon.png"));
+    expect(png.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    expect(png.toString("ascii", 12, 16)).toBe("IHDR");
+    const width = png.readUInt32BE(16);
+    const height = png.readUInt32BE(20);
+    expect(width).toBe(height);
+    expect(width).toBeGreaterThanOrEqual(256);
+  });
+
+  it("ships a monochrome activity SVG within the host's geometry limits", async () => {
+    const path = join(ROOT, "assets", "activity.svg");
+    const svg = await readFile(path, "utf8");
+    expect(Buffer.byteLength(svg)).toBeLessThanOrEqual(32 * 1024);
+    expect(svg).toMatch(/^<svg [^>]*viewBox="0 0 \d+ \d+"/);
+    const elements = [...svg.matchAll(/<([a-z]+)[\s/>]/g)].map((match) => match[1]);
+    expect(elements.length).toBeLessThanOrEqual(4);
+    for (const name of elements.slice(1)) {
+      expect(["path", "circle", "ellipse", "line", "polygon", "polyline", "rect", "g"]).toContain(name);
+    }
+    expect(svg).toContain("currentColor");
+    expect(svg).not.toMatch(/#[0-9a-f]{3,6}\b|<style|<script|href=|filter/i);
+  });
 });
 
 // openclaw.plugin.json is hand-authored. `openclaw plugins build` regenerates only
@@ -55,6 +88,16 @@ describe("openclaw.plugin.json", () => {
 
   it("declares the bundled skills directory", () => {
     expect(committed.skills).toEqual(["./skills"]);
+  });
+
+  it("declares exactly one ClawHub category", () => {
+    expect(committed.categories).toEqual(["inbox-collaboration"]);
+  });
+
+  it("marks every credential config field sensitive", () => {
+    for (const field of ["botToken", "userToken", "workflowTriggers"]) {
+      expect(committed.uiHints?.[field]?.sensitive).toBe(true);
+    }
   });
 
   it("is unchanged by a bare openclaw plugins build", () => {
