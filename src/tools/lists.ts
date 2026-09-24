@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import { callSlack, resolveToken, type PluginConfig, type SlackCallContext } from "../client.js";
 import type { ApprovalRule } from "../approvals.js";
+import { cursorParams, toPage, walkPages } from "../pagination.js";
 import type { ToolFactory } from "../schemas.js";
 
 /** Column types `slackLists.create` accepts in a `schema`. */
@@ -257,6 +258,58 @@ export function encodeListCell(column: ListColumn, value: ListCellValue): Record
   }
 }
 
+/**
+ * Curated item (see "Output shaping" in schemas.ts). Each field keeps its column ID and
+ * key, the plain-text rendering Slack sends for text-like columns, and Slack's `value`
+ * verbatim; the per-type copies (`rich_text`, `user`, `select`, ...) are dropped.
+ */
+const slackListField = Type.Object(
+  {
+    columnId: Type.String(),
+    key: Type.String(),
+    text: Type.Optional(Type.String()),
+    value: Type.Optional(Type.Unknown({ description: "Slack's cell value, passed through." })),
+  },
+  { additionalProperties: false },
+);
+
+const slackListItem = Type.Object(
+  {
+    id: Type.String(),
+    parentItemId: Type.Optional(Type.String({ description: "Set on subtasks." })),
+    createdBy: Type.Optional(Type.String()),
+    createdAt: Type.Optional(Type.Number({ description: "Unix seconds." })),
+    updatedAt: Type.Optional(Type.String({ description: "Unix seconds, as Slack sends it." })),
+    fields: Type.Array(slackListField),
+  },
+  { additionalProperties: false },
+);
+
+type RawItem = Record<string, unknown>;
+
+const present = (value: unknown) => value !== undefined && value !== null && value !== "";
+
+function curateField(raw: Record<string, unknown>) {
+  return {
+    columnId: String(raw.column_id ?? ""),
+    key: String(raw.key ?? ""),
+    ...(typeof raw.text === "string" && raw.text ? { text: raw.text } : {}),
+    ...(present(raw.value) ? { value: raw.value } : {}),
+  };
+}
+
+function curateItem(raw: RawItem) {
+  const fields = Array.isArray(raw.fields) ? (raw.fields as Record<string, unknown>[]) : [];
+  return {
+    id: String(raw.id ?? ""),
+    ...(present(raw.parent_record_id) ? { parentItemId: String(raw.parent_record_id) } : {}),
+    ...(present(raw.created_by) ? { createdBy: String(raw.created_by) } : {}),
+    ...(present(raw.date_created) ? { createdAt: Number(raw.date_created) } : {}),
+    ...(present(raw.updated_timestamp) ? { updatedAt: String(raw.updated_timestamp) } : {}),
+    fields: fields.map(curateField),
+  };
+}
+
 export const listTools = (tool: ToolFactory) => [
   tool({
     name: "slack_list_create",
@@ -468,6 +521,82 @@ export const listTools = (tool: ToolFactory) => [
         context,
       );
       return { listId, itemIds, deleted: itemIds.length };
+    },
+  }),
+  tool({
+    name: "slack_list_items_list",
+    label: "List Slack list items",
+    description:
+      "List the items (rows) in a Slack List, including subtasks, with each cell's column ID, key, and value. Set archived to list archived items instead. Follows Slack's pages automatically; if `hasMore` is still true, call again with the returned `cursor` for the rest. Use slack_list_schema to map column IDs to names.",
+    parameters: Type.Object({
+      listId: Type.String({ description: "List ID, e.g. F0123ABCD." }),
+      archived: Type.Optional(
+        Type.Boolean({ description: "true lists only archived items; omit or false for active items." }),
+      ),
+      cursor: Type.Optional(
+        Type.String({ description: "Resume from the `cursor` a previous call returned." }),
+      ),
+      limit: Type.Optional(
+        Type.Integer({ minimum: 1, maximum: 100, description: "Items per Slack page." }),
+      ),
+    }),
+    outputSchema: Type.Object(
+      {
+        listId: Type.String(),
+        items: Type.Array(slackListItem),
+        cursor: Type.Optional(Type.String()),
+        hasMore: Type.Boolean(),
+      },
+      { additionalProperties: false },
+    ),
+    async execute({ listId, archived, cursor, limit }, config, context) {
+      context.signal?.throwIfAborted();
+      const token = resolveToken(config);
+      const page = await walkPages(
+        async (request) => {
+          const body: Record<string, unknown> = { list_id: listId };
+          if (archived !== undefined) body.archived = archived;
+          Object.assign(body, cursorParams(request));
+          const data = await callSlack("slackLists.items.list", token, body, context);
+          return toPage<RawItem>(data, "items");
+        },
+        { cursor, limit, signal: context.signal },
+      );
+      return {
+        listId,
+        items: page.items.map(curateItem),
+        ...(page.cursor ? { cursor: page.cursor } : {}),
+        hasMore: page.hasMore,
+      };
+    },
+  }),
+  tool({
+    name: "slack_list_item_info",
+    label: "Read Slack list item",
+    description:
+      "Read one item (row) from a Slack List along with its subtasks, with each cell's column ID, key, and value.",
+    parameters: Type.Object({
+      listId: Type.String({ description: "List ID, e.g. F0123ABCD." }),
+      itemId: Type.String({ description: "Item ID, e.g. Rec0123ABCD." }),
+    }),
+    outputSchema: Type.Object(
+      { listId: Type.String(), item: slackListItem, subtasks: Type.Array(slackListItem) },
+      { additionalProperties: false },
+    ),
+    async execute({ listId, itemId }, config, context) {
+      context.signal?.throwIfAborted();
+      const data = await callSlack(
+        "slackLists.items.info",
+        resolveToken(config),
+        { list_id: listId, id: itemId },
+        context,
+      );
+      const subtasks = Array.isArray(data.subtasks) ? (data.subtasks as RawItem[]) : [];
+      return {
+        listId,
+        item: curateItem((data.record ?? {}) as RawItem),
+        subtasks: subtasks.map(curateItem),
+      };
     },
   }),
 ];

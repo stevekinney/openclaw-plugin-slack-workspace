@@ -140,7 +140,9 @@
       "slack_list_item_create",
       "slack_list_item_update",
       "slack_list_item_delete",
-      "slack_list_items_delete_multiple"
+      "slack_list_items_delete_multiple",
+      "slack_list_items_list",
+      "slack_list_item_info"
     ]
   },
   "toolMetadata": {
@@ -406,6 +408,20 @@
     "slack_list_items_delete_multiple": {
       "sideEffecting": true,
       "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_list_items_list": {
+      "sideEffecting": false,
+      "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_list_item_info": {
+      "sideEffecting": false,
+      "replaySafe": true,
       "profiles": [
         "messaging"
       ]
