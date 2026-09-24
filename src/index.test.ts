@@ -23,6 +23,7 @@ describe("slack-workspace", () => {
       "slack_post_chart",
       "slack_blocks_send",
       "slack_blocks_update",
+      "slack_message_get",
       "slack_canvas_create",
       "slack_canvas_edit",
       "slack_canvas_sections",

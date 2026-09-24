@@ -1,5 +1,7 @@
-import { Type } from "typebox";
+import { isDeepStrictEqual } from "node:util";
+import { Type, type Static } from "typebox";
 import { callSlack, resolveToken, type PluginConfig, type SlackCallContext } from "../client.js";
+import { cursorParams, toPage } from "../pagination.js";
 import {
   blocksSchema,
   channelIdParam,
@@ -77,6 +79,32 @@ function chartFallback(
         );
   return escapeText([`${title} (${chartType} chart)`, ...lines].join("\n"));
 }
+
+/** Messages per history/replies page; Slack recommends no more than 200. */
+const HISTORY_PAGE_LIMIT = 200;
+
+type MetadataMessage = {
+  ts?: unknown;
+  thread_ts?: unknown;
+  text?: unknown;
+  metadata?: { event_type?: unknown; event_payload?: unknown };
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** One message whose metadata matched, curated to what finding and updating it needs. */
+const stampedMessageSchema = Type.Object(
+  {
+    channelId: Type.String(),
+    ts: Type.String({ description: "Pass as `updateTs`/`ts` to rewrite the message." }),
+    threadTs: Type.Optional(Type.String({ description: "Thread the message belongs to, if any." })),
+    text: Type.String(),
+    eventType: Type.String(),
+    eventPayload: Type.Record(Type.String(), Type.Unknown()),
+  },
+  { additionalProperties: false },
+);
 
 async function postOrUpdate(
   config: PluginConfig,
@@ -452,6 +480,106 @@ export const messagingTools = (tool: ToolFactory) => [
       if (metadata) body.metadata = toSlackMetadata(metadata);
       const data = await callSlack("chat.update", resolveToken(config, "bot"), body, context);
       return { channelId, ts: String(data.ts ?? ts), blockCount: blocks.length };
+    },
+  }),
+
+  tool({
+    name: "slack_message_get",
+    label: "Find Slack message by metadata",
+    description:
+      "Find messages by the metadata stamped on them (the `metadata` param of slack_post_*/slack_blocks_*), newest first, and return each one's `ts` for slack_blocks_update or `updateTs`. Use this to re-find your own cards instead of remembering timestamps or searching text. Reads channel history, or one thread with `threadTs`, via conversations.history/replies — it polls on each call; nothing is pushed when metadata changes. Finds nothing if the event type isn't registered in the app manifest, because Slack drops unregistered metadata on post.",
+    parameters: Type.Object({
+      channelId: channelIdParam("The channel to search."),
+      eventType: Type.String({
+        pattern: "^[A-Za-z0-9_]+$",
+        maxLength: 255,
+        description: "Metadata event type to match, e.g. \"openclaw_card_v1\".",
+      }),
+      matchPayload: Type.Optional(
+        Type.Record(Type.String(), Type.Unknown(), {
+          description:
+            "Only return messages whose payload has every one of these keys with an equal value, e.g. {\"taskId\":\"T-1\"}. Nested values compare structurally.",
+        }),
+      ),
+      threadTs: Type.Optional(
+        Type.String({ description: "Search only this thread's parent and replies." }),
+      ),
+      oldest: Type.Optional(
+        Type.String({ description: "Only messages after this timestamp, e.g. \"1726000000.000000\"." }),
+      ),
+      latest: Type.Optional(
+        Type.String({ description: "Only messages before this timestamp." }),
+      ),
+      limit: Type.Optional(
+        Type.Integer({
+          minimum: 1,
+          maximum: 100,
+          description: "Stop after this many matches. Default 20; use 1 to find the latest card.",
+        }),
+      ),
+      maxPages: Type.Optional(
+        Type.Integer({
+          minimum: 1,
+          maximum: 20,
+          description: `Pages of ${HISTORY_PAGE_LIMIT} messages to scan before giving up. Default 5.`,
+        }),
+      ),
+    }),
+    outputSchema: Type.Object(
+      {
+        messages: Type.Array(stampedMessageSchema),
+        truncated: Type.Boolean({
+          description: "More messages remained unscanned; narrow with oldest/latest or raise maxPages.",
+        }),
+      },
+      { additionalProperties: false },
+    ),
+    async execute(
+      { channelId, eventType, matchPayload, threadTs, oldest, latest, limit = 20, maxPages = 5 },
+      config,
+      context,
+    ) {
+      const token = resolveToken(config, "bot");
+      const method = threadTs ? "conversations.replies" : "conversations.history";
+      const base: Record<string, unknown> = { channel: channelId, include_all_metadata: true };
+      if (threadTs) base.ts = threadTs;
+      if (oldest) base.oldest = oldest;
+      if (latest) base.latest = latest;
+      const wanted = Object.entries(matchPayload ?? {});
+      const messages: Static<typeof stampedMessageSchema>[] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < maxPages; page++) {
+        context.signal?.throwIfAborted();
+        const data = await callSlack(
+          method,
+          token,
+          { ...base, ...cursorParams({ cursor, limit: HISTORY_PAGE_LIMIT }) },
+          context,
+          true,
+        );
+        const { items, cursor: next } = toPage<MetadataMessage>(data, "messages");
+        for (const [index, message] of items.entries()) {
+          const metadata = message.metadata;
+          const payload = metadata?.event_payload;
+          if (!isRecord(metadata) || metadata.event_type !== eventType || !isRecord(payload)) continue;
+          if (!wanted.every(([key, value]) => isDeepStrictEqual(payload[key], value))) continue;
+          messages.push({
+            channelId,
+            ts: String(message.ts ?? ""),
+            ...(typeof message.thread_ts === "string" ? { threadTs: message.thread_ts } : {}),
+            text: typeof message.text === "string" ? message.text : "",
+            eventType,
+            eventPayload: payload,
+          });
+          if (messages.length >= limit) {
+            return { messages, truncated: index < items.length - 1 || Boolean(next) };
+          }
+        }
+        // A cursor that does not advance would loop forever; stop and report it.
+        if (!next || next === cursor) return { messages, truncated: Boolean(next) };
+        cursor = next;
+      }
+      return { messages, truncated: true };
     },
   }),
 ];
