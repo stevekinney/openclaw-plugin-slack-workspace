@@ -76,6 +76,23 @@ type RegisteredTool = {
   ) => Promise<{ details: unknown }>;
 };
 
+/** Log lines captured from the fake plugin logger, tagged by level. */
+export type LogLine = { level: "debug" | "info" | "warn" | "error"; message: string };
+
+/** A plugin logger that records every line so tests can assert on (and scan) it. */
+export function recordingLogger(lines: LogLine[] = []) {
+  const record = (level: LogLine["level"]) => (message: string) => {
+    lines.push({ level, message });
+  };
+  return {
+    lines,
+    debug: record("debug"),
+    info: record("info"),
+    warn: record("warn"),
+    error: record("error"),
+  };
+}
+
 /**
  * Register the plugin against a minimal fake API and invoke one tool the way the
  * host does, returning the JSON `details` payload. Parameters are passed through
@@ -85,10 +102,12 @@ export async function runTool(
   name: string,
   params: Record<string, unknown>,
   config: Record<string, unknown> = TEST_CONFIG,
+  logger = recordingLogger(),
 ): Promise<unknown> {
   const tools: RegisteredTool[] = [];
   const api = {
     pluginConfig: config,
+    logger,
     registerTool: (tool: RegisteredTool) => tools.push(tool),
   };
   (entry as unknown as { register: (api: unknown) => void }).register(api);

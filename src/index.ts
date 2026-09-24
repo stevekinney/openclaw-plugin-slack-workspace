@@ -34,65 +34,165 @@ function resolveToken(config: PluginConfig, kind: "bot" | "user" = "bot"): strin
   return token;
 }
 
+type PluginLogger = {
+  debug?: (message: string) => void;
+  info: (message: string) => void;
+  warn: (message: string) => void;
+};
+
+/** The slice of the tool execution context the Slack client needs. */
+type SlackCallContext = { signal?: AbortSignal; api?: { logger?: PluginLogger } };
+
+/** Mirrors the bundled Slack channel plugin: retry a rate-limited call at most twice. */
+const MAX_RATE_LIMIT_RETRIES = 2;
+/** Longest `Retry-After` worth waiting out inside a single tool call. */
+const MAX_RETRY_AFTER_SECONDS = 30;
+
+/** One-line explanations for error codes whose bare name does not say what to do. */
+const ERROR_HINTS: Record<string, string> = {
+  not_allowed_token_type: "this method requires the other token type — bot vs user",
+  cant_update_message: "only messages posted by this app's bot token can be updated",
+  free_teams_cannot_create_standalone_canvases:
+    "free workspaces cannot create standalone canvases; use a channel canvas instead",
+  channel_canvas_already_exists: "this channel already has a canvas; edit that one instead",
+  canvas_too_large: "the canvas exceeds Slack's size limit; split the content up",
+  canvas_editing_locked: "the canvas is locked for editing; try again shortly",
+  invalid_primary_column: "a list's primary column must be a text column",
+  over_column_maximum: "the list has more columns than Slack allows",
+};
+
+function retryAfterSeconds(response: Response): number {
+  const seconds = Number(response.headers.get("retry-after"));
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : 1;
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    signal?.throwIfAborted();
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 /**
  * Slack's older methods (search.*, reminders.*) only accept form encoding; the newer
  * ones accept JSON. `form: true` picks the legacy wire format.
+ *
+ * Rate-limited calls (HTTP 429 or a `ratelimited` body) are retried up to twice,
+ * honoring `Retry-After`. Each call logs its method, elapsed time, and outcome —
+ * never the token or the response body.
  */
 async function callSlackRaw(
   method: string,
   token: string,
   body: Record<string, unknown>,
-  signal?: AbortSignal,
+  context: SlackCallContext = {},
   form = false,
 ): Promise<{ data: SlackResponse; scopes: string[] }> {
-  const response = await fetch(`${SLACK_API}/${method}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": form
-        ? "application/x-www-form-urlencoded; charset=utf-8"
-        : "application/json; charset=utf-8",
-    },
-    body: form
-      ? new URLSearchParams(
-          Object.entries(body).flatMap(([key, value]) =>
-            value === undefined || value === null ? [] : [[key, String(value)]],
-          ),
-        ).toString()
-      : JSON.stringify(body),
-    signal,
-  });
-  const data = (await response.json()) as SlackResponse;
-  if (!data.ok) {
-    const error = data.error ?? `http_${response.status}`;
-    // Block Kit rejections carry per-block detail here; without it "invalid_blocks"
-    // is unactionable.
-    const detail = (data.response_metadata as { messages?: string[] } | undefined)?.messages;
-    const hint =
-      error === "not_allowed_token_type"
-        ? " (this method requires the other token type — bot vs user)"
-        : error === "missing_scope"
+  const { signal } = context;
+  const logger = context.api?.logger;
+  const started = Date.now();
+  const log = (outcome: string) => {
+    const message = `slack-workspace: ${method} ${outcome} in ${Date.now() - started}ms`;
+    if (outcome === "ok") (logger?.debug ?? logger?.info)?.(message);
+    else logger?.warn(message);
+  };
+
+  for (let attempt = 0; ; attempt++) {
+    const response = await fetch(`${SLACK_API}/${method}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": form
+          ? "application/x-www-form-urlencoded; charset=utf-8"
+          : "application/json; charset=utf-8",
+      },
+      body: form
+        ? new URLSearchParams(
+            Object.entries(body).flatMap(([key, value]) =>
+              value === undefined || value === null ? [] : [[key, String(value)]],
+            ),
+          ).toString()
+        : JSON.stringify(body),
+      signal,
+    });
+
+    let data: SlackResponse;
+    try {
+      data = (await response.json()) as SlackResponse;
+    } catch {
+      // Slack's edge sometimes answers with an HTML error page; a raw SyntaxError
+      // from JSON.parse would hide the status that actually matters.
+      data = { ok: false };
+      if (response.status !== 429) {
+        log(`error=http_${response.status}`);
+        const contentType = response.headers.get("content-type") ?? "unknown";
+        throw new Error(
+          `Slack ${method} failed: http_${response.status} (non-JSON response, content-type ${contentType})`,
+        );
+      }
+    }
+
+    if (response.status === 429 || data.error === "ratelimited") {
+      const wait = retryAfterSeconds(response);
+      if (wait > MAX_RETRY_AFTER_SECONDS) {
+        log(`error=ratelimited`);
+        throw new Error(
+          `Slack ${method} failed: ratelimited (Slack asked to wait ${wait}s; try again later)`,
+        );
+      }
+      if (attempt < MAX_RATE_LIMIT_RETRIES) {
+        logger?.warn(`slack-workspace: ${method} ratelimited; retrying in ${wait}s`);
+        await sleep(wait * 1000, signal);
+        continue;
+      }
+      log(`error=ratelimited`);
+      throw new Error(
+        `Slack ${method} failed: ratelimited (still rate limited after ${MAX_RATE_LIMIT_RETRIES} retries)`,
+      );
+    }
+
+    if (!data.ok) {
+      const error = data.error ?? `http_${response.status}`;
+      log(`error=${error}`);
+      // Block Kit rejections carry per-block detail here; without it "invalid_blocks"
+      // is unactionable.
+      const detail = (data.response_metadata as { messages?: string[] } | undefined)?.messages;
+      const hint =
+        error === "missing_scope"
           ? ` (needs scope: ${String(data.needed ?? "unknown")})`
-          : detail?.length
-            ? ` — ${detail.join("; ")}`
-            : "";
-    throw new Error(`Slack ${method} failed: ${error}${hint}`);
+          : ERROR_HINTS[error]
+            ? ` (${ERROR_HINTS[error]})`
+            : detail?.length
+              ? ` — ${detail.join("; ")}`
+              : "";
+      throw new Error(`Slack ${method} failed: ${error}${hint}`);
+    }
+
+    log("ok");
+    const scopes = (response.headers.get("x-oauth-scopes") ?? "")
+      .split(",")
+      .map((scope) => scope.trim())
+      .filter(Boolean);
+    return { data, scopes };
   }
-  const scopes = (response.headers.get("x-oauth-scopes") ?? "")
-    .split(",")
-    .map((scope) => scope.trim())
-    .filter(Boolean);
-  return { data, scopes };
 }
 
 async function callSlack(
   method: string,
   token: string,
   body: Record<string, unknown>,
-  signal?: AbortSignal,
+  context?: SlackCallContext,
   form = false,
 ): Promise<SlackResponse> {
-  return (await callSlackRaw(method, token, body, signal, form)).data;
+  return (await callSlackRaw(method, token, body, context, form)).data;
 }
 
 const secretRefSchema = Type.Object({
@@ -145,7 +245,7 @@ async function postOrUpdate(
     threadTs?: string;
     updateTs?: string;
   },
-  signal?: AbortSignal,
+  context?: SlackCallContext,
 ): Promise<{ channelId: string; ts: string; updated: boolean }> {
   const token = resolveToken(config, "bot");
   const body: Record<string, unknown> = {
@@ -155,11 +255,11 @@ async function postOrUpdate(
   };
   if (args.updateTs) {
     body.ts = args.updateTs;
-    const data = await callSlack("chat.update", token, body, signal);
+    const data = await callSlack("chat.update", token, body, context);
     return { channelId: args.channelId, ts: String(data.ts ?? args.updateTs), updated: true };
   }
   if (args.threadTs) body.thread_ts = args.threadTs;
-  const data = await callSlack("chat.postMessage", token, body, signal);
+  const data = await callSlack("chat.postMessage", token, body, context);
   return { channelId: args.channelId, ts: String(data.ts ?? ""), updated: false };
 }
 
@@ -206,7 +306,7 @@ export default defineToolPlugin({
           "auth.test",
           resolveToken(config, kind),
           {},
-          context.signal,
+          context,
         );
         return {
           tokenKind: kind,
@@ -263,7 +363,7 @@ export default defineToolPlugin({
             sort: sort ?? "score",
             sort_dir: sortDir ?? "desc",
           },
-          context.signal,
+          context,
           true,
         );
 
@@ -363,7 +463,7 @@ export default defineToolPlugin({
           "chat.scheduleMessage",
           resolveToken(config, "bot"),
           body,
-          context.signal,
+          context,
         );
         return {
           channelId,
@@ -392,7 +492,7 @@ export default defineToolPlugin({
           "chat.scheduledMessages.list",
           resolveToken(config, "bot"),
           body,
-          context.signal,
+          context,
         );
         const scheduled = (data.scheduled_messages ?? []) as Record<string, unknown>[];
         return {
@@ -421,7 +521,7 @@ export default defineToolPlugin({
           "chat.deleteScheduledMessage",
           resolveToken(config, "bot"),
           { channel: channelId, scheduled_message_id: scheduledMessageId },
-          context.signal,
+          context,
         );
         return { channelId, scheduledMessageId, cancelled: true };
       },
@@ -484,7 +584,7 @@ export default defineToolPlugin({
         return postOrUpdate(
           config,
           { channelId, text: caption, blocks: [table], threadTs, updateTs },
-          context.signal,
+          context,
         );
       },
     }),
@@ -541,7 +641,7 @@ export default defineToolPlugin({
             threadTs,
             updateTs,
           },
-          context.signal,
+          context,
         );
       },
     }),
@@ -636,7 +736,7 @@ export default defineToolPlugin({
             threadTs: args.threadTs,
             updateTs: args.updateTs,
           },
-          context.signal,
+          context,
         );
       },
     }),
@@ -677,7 +777,7 @@ export default defineToolPlugin({
           "chat.postMessage",
           resolveToken(config, "bot"),
           body,
-          context.signal,
+          context,
         );
         return { channelId, ts: String(data.ts ?? ""), blockCount: blocks.length };
       },
@@ -704,7 +804,7 @@ export default defineToolPlugin({
           "chat.update",
           resolveToken(config, "bot"),
           { channel: channelId, ts, text, blocks },
-          context.signal,
+          context,
         );
         return { channelId, ts: String(data.ts ?? ts), blockCount: blocks.length };
       },
@@ -747,7 +847,7 @@ export default defineToolPlugin({
             title,
             document_content: { type: "markdown", markdown },
           },
-          context.signal,
+          context,
         );
         const canvasId = String(created.canvas_id ?? "");
         if (channelId) {
@@ -759,7 +859,7 @@ export default defineToolPlugin({
               channel_ids: [channelId],
               access_level: accessLevel ?? "write",
             },
-            context.signal,
+            context,
           );
         }
         return { canvasId, url: canvasUrl(canvasId), sharedWith: channelId ?? null };
@@ -804,7 +904,7 @@ export default defineToolPlugin({
             "canvases.edit",
             token,
             { canvas_id: canvasId, changes: [{ operation: "rename", title_content: title }] },
-            context.signal,
+            context,
           );
           return { canvasId, operation, url: canvasUrl(canvasId) };
         }
@@ -826,7 +926,7 @@ export default defineToolPlugin({
           "canvases.edit",
           token,
           { canvas_id: canvasId, changes: [change] },
-          context.signal,
+          context,
         );
         return { canvasId, operation, url: canvasUrl(canvasId) };
       },
@@ -852,7 +952,7 @@ export default defineToolPlugin({
           "canvases.sections.lookup",
           token,
           { canvas_id: canvasId, criteria },
-          context.signal,
+          context,
         );
         return { sections: data.sections ?? [] };
       },
@@ -872,7 +972,7 @@ export default defineToolPlugin({
           "bookmarks.list",
           token,
           { channel_id: channelId },
-          context.signal,
+          context,
         );
         return { bookmarks: data.bookmarks ?? [] };
       },
@@ -898,7 +998,7 @@ export default defineToolPlugin({
           link,
         };
         if (emoji) body.emoji = emoji;
-        const data = await callSlack("bookmarks.add", token, body, context.signal);
+        const data = await callSlack("bookmarks.add", token, body, context);
         return { bookmark: data.bookmark ?? null };
       },
     }),
@@ -918,7 +1018,7 @@ export default defineToolPlugin({
           "bookmarks.remove",
           token,
           { channel_id: channelId, bookmark_id: bookmarkId },
-          context.signal,
+          context,
         );
         return { removed: true, bookmarkId };
       },

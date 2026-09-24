@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import entry from "./index.js";
 import { getToolPluginMetadata } from "openclaw/plugin-sdk/tool-plugin";
-import { runTool, slackResponse, withMockFetch } from "./test-utils.js";
+import {
+  recordingLogger,
+  runTool,
+  slackResponse,
+  TEST_CONFIG,
+  withMockFetch,
+} from "./test-utils.js";
 
 describe("slack-workspace", () => {
   it("declares tool metadata", () => {
@@ -231,5 +237,164 @@ describe("Slack error hints", () => {
         );
       },
     );
+  });
+});
+
+describe("Slack HTTP client hardening", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("raises a clear error for a non-JSON 500 instead of a raw SyntaxError", async () => {
+    await withMockFetch(
+      () =>
+        new Response("<html><body>Internal Server Error</body></html>", {
+          status: 500,
+          headers: { "content-type": "text/html" },
+        }),
+      async () => {
+        const failure = runTool("slack_bookmark_list", target);
+        await expect(failure).rejects.toThrow(
+          "Slack bookmarks.list failed: http_500 (non-JSON response, content-type text/html)",
+        );
+        await expect(failure).rejects.not.toBeInstanceOf(SyntaxError);
+      },
+    );
+  });
+
+  const rateLimited = (retryAfter?: string) =>
+    slackResponse(
+      { ok: false, error: "ratelimited" },
+      { status: 429, headers: retryAfter === undefined ? {} : { "retry-after": retryAfter } },
+    );
+
+  it("retries an HTTP 429 after its Retry-After delay, then succeeds", async () => {
+    vi.useFakeTimers();
+    let attempt = 0;
+    await withMockFetch(
+      () => (attempt++ === 0 ? rateLimited("2") : { ok: true, bookmarks: [] }),
+      async (calls) => {
+        const pending = runTool("slack_bookmark_list", target);
+        await vi.advanceTimersByTimeAsync(1999);
+        expect(calls).toHaveLength(1);
+        await vi.advanceTimersByTimeAsync(1);
+        await expect(pending).resolves.toEqual({ bookmarks: [] });
+        expect(calls).toHaveLength(2);
+      },
+    );
+  });
+
+  it("retries a 200 `ratelimited` body the same way", async () => {
+    vi.useFakeTimers();
+    let attempt = 0;
+    await withMockFetch(
+      () =>
+        attempt++ === 0
+          ? slackResponse({ ok: false, error: "ratelimited" }, { headers: { "retry-after": "1" } })
+          : { ok: true, bookmarks: [] },
+      async (calls) => {
+        const pending = runTool("slack_bookmark_list", target);
+        await vi.advanceTimersByTimeAsync(1000);
+        await expect(pending).resolves.toEqual({ bookmarks: [] });
+        expect(calls).toHaveLength(2);
+      },
+    );
+  });
+
+  it("gives up after 2 retries", async () => {
+    vi.useFakeTimers();
+    await withMockFetch(
+      () => rateLimited("1"),
+      async (calls) => {
+        const pending = runTool("slack_bookmark_list", target);
+        const settled = expect(pending).rejects.toThrow("Slack bookmarks.list failed: ratelimited");
+        await vi.advanceTimersByTimeAsync(10_000);
+        await settled;
+        expect(calls).toHaveLength(3);
+      },
+    );
+  });
+
+  it("does not wait out a Retry-After longer than the cap", async () => {
+    await withMockFetch(
+      () => rateLimited("600"),
+      async (calls) => {
+        await expect(runTool("slack_bookmark_list", target)).rejects.toThrow(
+          "Slack bookmarks.list failed: ratelimited (Slack asked to wait 600s; try again later)",
+        );
+        expect(calls).toHaveLength(1);
+      },
+    );
+  });
+
+  it("stops retrying when the call is aborted during backoff", async () => {
+    vi.useFakeTimers();
+    const tools: { name: string; execute: (...args: unknown[]) => Promise<unknown> }[] = [];
+    (entry as unknown as { register: (api: unknown) => void }).register({
+      pluginConfig: { botToken: "xoxb-test" },
+      logger: { info() {}, warn() {}, error() {} },
+      registerTool: (tool: (typeof tools)[number]) => tools.push(tool),
+    });
+    const bookmarkList = tools.find((tool) => tool.name === "slack_bookmark_list")!;
+    const controller = new AbortController();
+    await withMockFetch(
+      () => rateLimited("5"),
+      async (calls) => {
+        const pending = bookmarkList.execute("test-call", target, controller.signal);
+        const settled = expect(pending).rejects.toThrow();
+        await vi.advanceTimersByTimeAsync(100);
+        controller.abort();
+        await settled;
+        expect(calls).toHaveLength(1);
+      },
+    );
+  });
+
+  it.each([
+    ["cant_update_message", "only messages posted by this app's bot token can be updated"],
+    [
+      "free_teams_cannot_create_standalone_canvases",
+      "free workspaces cannot create standalone canvases",
+    ],
+    ["channel_canvas_already_exists", "this channel already has a canvas"],
+    ["canvas_too_large", "the canvas exceeds Slack's size limit"],
+    ["canvas_editing_locked", "the canvas is locked for editing"],
+    ["invalid_primary_column", "a list's primary column must be a text column"],
+    ["over_column_maximum", "the list has more columns than Slack allows"],
+  ])("adds a one-line hint for %s", async (error, hint) => {
+    await withMockFetch(
+      () => ({ ok: false, error }),
+      async () => {
+        await expect(runTool("slack_bookmark_list", target)).rejects.toThrow(
+          `Slack bookmarks.list failed: ${error} (${hint}`,
+        );
+      },
+    );
+  });
+
+  it("logs method, elapsed time, and outcome without the token or response body", async () => {
+    const logger = recordingLogger();
+    await withMockFetch(
+      (call) =>
+        call.method === "bookmarks.list"
+          ? { ok: true, bookmarks: [{ id: "Bk0SECRETBODY" }] }
+          : { ok: false, error: "channel_not_found" },
+      async () => {
+        await runTool("slack_bookmark_list", target, TEST_CONFIG, logger);
+        await expect(
+          runTool("slack_bookmark_remove", { ...target, bookmarkId: "Bk1" }, TEST_CONFIG, logger),
+        ).rejects.toThrow("channel_not_found");
+      },
+    );
+    expect(logger.lines).toHaveLength(2);
+    expect(logger.lines[0].message).toMatch(/^slack-workspace: bookmarks\.list ok in \d+ms$/);
+    expect(logger.lines[1]).toMatchObject({ level: "warn" });
+    expect(logger.lines[1].message).toMatch(
+      /^slack-workspace: bookmarks\.remove error=channel_not_found in \d+ms$/,
+    );
+    const everything = logger.lines.map((line) => line.message).join("\n");
+    expect(everything).not.toContain("xoxb-test");
+    expect(everything).not.toContain("xoxp-test");
+    expect(everything).not.toContain("Bk0SECRETBODY");
   });
 });
