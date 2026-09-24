@@ -28,6 +28,14 @@ All four tools accept `updateTs`. Post once, keep the returned `ts`, then pass i
 `updateTs` to rewrite that message in place. A six-step task should be one card that
 changes, not six messages.
 
+## Link previews
+
+New posts from all four tools set `unfurl_links` and `unfurl_media` to `false`,
+matching the Slack channel plugin's replies, so a URL in a table cell or plan step
+doesn't expand into a preview. Pass `unfurlLinks: true` or `unfurlMedia: true` when
+you want the preview. Both are ignored with `updateTs`: an edit keeps the original
+post's unfurl behavior.
+
 ## Raw blocks
 
 `slack_blocks_send` passes `blocks` to Slack verbatim. `text` is required — it is the

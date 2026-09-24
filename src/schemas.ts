@@ -49,6 +49,23 @@ export const blocksSchema = Type.Array(blockSchema, {
     "Block Kit blocks, passed to Slack verbatim. Supports every block type the workspace allows, including ones OpenClaw's portable `presentation` cannot express: section, header, actions, context, divider, image, input, rich_text, table, video, and the newer card/carousel/alert families. Max 50 blocks.",
 });
 
+/**
+ * Slack unfurls by default; the bundled channel plugin doesn't. Match it so a URL
+ * in a table cell doesn't unfurl where the agent's ordinary replies wouldn't.
+ */
+export const unfurlParams = {
+  unfurlLinks: Type.Optional(
+    Type.Boolean({
+      description: "Unfurl text-based links into previews. Default false. Ignored with updateTs.",
+    }),
+  ),
+  unfurlMedia: Type.Optional(
+    Type.Boolean({
+      description: "Unfurl media links (images, video). Default false. Ignored with updateTs.",
+    }),
+  ),
+};
+
 /** Where a structured post lands: a channel, optionally a thread, optionally in place. */
 export const targetParams = {
   channelId: channelIdParam(),
@@ -59,6 +76,7 @@ export const targetParams = {
         "Timestamp of an existing message from this app to rewrite in place instead of posting a new one. Use this to keep one live card current.",
     }),
   ),
+  ...unfurlParams,
 };
 
 export const postResultSchema = Type.Object(
