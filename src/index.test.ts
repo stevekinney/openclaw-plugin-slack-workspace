@@ -98,6 +98,39 @@ describe("slack_post_table", () => {
       ]);
     });
   });
+
+  it("returns the DM channel Slack resolved from a user ID, not the input", async () => {
+    await withMockFetch(
+      () => ({ ok: true, channel: "D0RESOLVED", ts: "1700000000.000100" }),
+      async (calls) => {
+        const result = await runTool("slack_post_table", {
+          channelId: "U0TEST",
+          caption: "Scores",
+          columns: ["name"],
+          rows: [["a"]],
+        });
+        expect(calls[0].body.channel).toBe("U0TEST");
+        expect(result).toEqual({ channelId: "D0RESOLVED", ts: "1700000000.000100", updated: false });
+      },
+    );
+  });
+
+  it("returns the channel Slack reports from chat.update", async () => {
+    await withMockFetch(
+      () => ({ ok: true, channel: "D0RESOLVED", ts: "1700000000.000100" }),
+      async (calls) => {
+        const result = await runTool("slack_post_table", {
+          channelId: "U0TEST",
+          updateTs: "1700000000.000100",
+          caption: "Scores",
+          columns: ["name"],
+          rows: [["a"]],
+        });
+        expect(calls[0].method).toBe("chat.update");
+        expect(result).toEqual({ channelId: "D0RESOLVED", ts: "1700000000.000100", updated: true });
+      },
+    );
+  });
 });
 
 describe("slack_post_plan", () => {
@@ -212,6 +245,21 @@ describe("slack_schedule_message postAt bounds", () => {
         });
         expect(calls.map((call) => call.method)).toEqual(["chat.scheduleMessage"]);
         expect(calls[0].body.post_at).toBe(postAt);
+      },
+    );
+  });
+
+  it("returns the DM channel Slack resolved from a user ID, not the input", async () => {
+    await withMockFetch(
+      () => ({ ok: true, channel: "D0RESOLVED", scheduled_message_id: "Q0TEST" }),
+      async (calls) => {
+        const result = await runTool("slack_schedule_message", {
+          channelId: "U0TEST",
+          text: "ping",
+          postAt: nowSeconds + day,
+        });
+        expect(calls[0].body.channel).toBe("U0TEST");
+        expect(result).toMatchObject({ channelId: "D0RESOLVED", scheduledMessageId: "Q0TEST" });
       },
     );
   });
