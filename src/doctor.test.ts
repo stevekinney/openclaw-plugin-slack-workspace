@@ -28,6 +28,8 @@ const BOT_SCOPES = [
   "lists:read",
   "lists:write",
   "metadata.message:read",
+  "remote_files:share",
+  "remote_files:write",
   "usergroups:read",
 ];
 const USER_SCOPES = ["search:read"];
@@ -83,6 +85,8 @@ describe("auditScopes", () => {
           "lists:read",
           "lists:write",
           "metadata.message:read",
+          "remote_files:share",
+          "remote_files:write",
           "usergroups:read",
         ],
       });

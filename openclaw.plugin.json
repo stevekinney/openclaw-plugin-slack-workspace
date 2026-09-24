@@ -1,7 +1,7 @@
 {
   "id": "slack-workspace",
   "name": "Slack Workspace",
-  "description": "Slack workspace tools: identity and message scheduling, search, structured messaging (tables, plans, charts, rich text), raw Block Kit messages, canvases, channel bookmarks, public-channel lifecycle (create, archive, rename, topic, purpose, invite, join, leave, one-call kickoff), Slack Lists, file uploads, Workflow Builder webhook triggers, and read-only user group lookups.",
+  "description": "Slack workspace tools: identity and message scheduling, search, structured messaging (tables, plans, charts, rich text), raw Block Kit messages, canvases, channel bookmarks, public-channel lifecycle (create, archive, rename, topic, purpose, invite, join, leave, one-call kickoff), Slack Lists, file uploads, Workflow Builder webhook triggers, read-only user group lookups, and remote files (external documents as native Slack files).",
   "version": "0.1.0",
   "configSchema": {
     "type": "object",
@@ -193,7 +193,11 @@
       "slack_assistant_suggest_prompts",
       "slack_workflow_trigger_run",
       "slack_usergroup_list",
-      "slack_usergroup_members"
+      "slack_usergroup_members",
+      "slack_remote_file_add",
+      "slack_remote_file_update",
+      "slack_remote_file_remove",
+      "slack_remote_file_share"
     ]
   },
   "toolMetadata": {
@@ -578,6 +582,34 @@
     "slack_usergroup_members": {
       "sideEffecting": false,
       "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_remote_file_add": {
+      "sideEffecting": true,
+      "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_remote_file_update": {
+      "sideEffecting": true,
+      "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_remote_file_remove": {
+      "sideEffecting": true,
+      "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_remote_file_share": {
+      "sideEffecting": true,
+      "replaySafe": false,
       "profiles": [
         "messaging"
       ]

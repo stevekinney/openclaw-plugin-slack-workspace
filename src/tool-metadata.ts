@@ -79,4 +79,11 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
   slack_workflow_trigger_run: write,
   slack_usergroup_list: read,
   slack_usergroup_members: read,
+  // A second add with the same external ID is refused by Slack, so it is not replay-safe.
+  slack_remote_file_add: write,
+  // Sets the given fields to fixed values; repeating it lands the same file.
+  slack_remote_file_update: idempotentWrite,
+  slack_remote_file_remove: write,
+  // Each share posts the file into the channels again.
+  slack_remote_file_share: write,
 };

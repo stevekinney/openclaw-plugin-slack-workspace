@@ -68,6 +68,10 @@ describe("slack-workspace", () => {
       "slack_workflow_trigger_run",
       "slack_usergroup_list",
       "slack_usergroup_members",
+      "slack_remote_file_add",
+      "slack_remote_file_update",
+      "slack_remote_file_remove",
+      "slack_remote_file_share",
     ]);
   });
 
