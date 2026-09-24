@@ -700,7 +700,8 @@ channel plugin does *not* already own — see **Not doing**, below).
   - Tests: none required beyond the live verification noted in the PR.
   - Size: S
 
-- [ ] **M-10: Spike — is a modal (views.open) tool even reachable from this plugin?** — `views.open` requires a `trigger_id` minted from a live Slack interaction payload (a button click, slash command, or shortcut) and that id expires in 3 seconds. An agent-invoked tool's `execute()` context has no such id today, and the interaction payload itself arrives on the Socket Mode connection the bundled channel plugin owns, not this tool plugin. Confirm whether the channel plugin exposes a `trigger_id` to tool context (via `toolContext` or similar) for any in-flight interaction; if not, record modal support under **Not doing** as fully gated on both a channel-plugin relay of `trigger_id` and the O-01 architecture migration (Tier 0.5), and do not schedule a build task for it.
+- [x] **M-10: Spike — is a modal (views.open) tool even reachable from this plugin?** — `views.open` requires a `trigger_id` minted from a live Slack interaction payload (a button click, slash command, or shortcut) and that id expires in 3 seconds. An agent-invoked tool's `execute()` context has no such id today, and the interaction payload itself arrives on the Socket Mode connection the bundled channel plugin owns, not this tool plugin. Confirm whether the channel plugin exposes a `trigger_id` to tool context (via `toolContext` or similar) for any in-flight interaction; if not, record modal support under **Not doing** as fully gated on both a channel-plugin relay of `trigger_id` and the O-01 architecture migration (Tier 0.5), and do not schedule a build task for it.
+  - **Finding (2026-09-24): no — an agent tool cannot obtain a `trigger_id`, so no `slack_modal_open` tool ships.** Checked against the pinned `openclaw@2026.9.5` SDK and docs: `OpenClawPluginToolContext` (the `toolContext` handed to tool factories/`execute`) carries session, sender, delivery-route and config fields but no interaction payload, `trigger_id`, or `response_url`; and `docs/channels/slack/events.md` states outright that the channel plugin redacts trigger IDs and response URLs from agent context when it turns block actions, shortcuts and modal events into `Slack interaction: ...` system events. The only surface that sees a raw interaction is `api.registerInteractiveHandler({ channel: "slack", namespace, handler })` (available now that this plugin uses `definePluginEntry`), but that is a gateway-side callback, not an agent tool: it fires inside the 3-second window only for actions routed to the plugin's own namespace (`openclaw:<namespace>:...` callback/action IDs), and whether the Slack handler context even includes `trigger_id` is UNVERIFIED (the SDK types it as `unknown`; the `@openclaw/slack` package that defines it isn't installed in this repo). Recorded under **Not doing**.
   - Why: this closes out the "modals" question definitively instead of leaving a half-buildable tool on the backlog with acceptance criteria that assume an input the agent can't actually supply.
   - Scope(s) & token type: n/a (spike; `views.open` needs no scope beyond an existing interaction context).
   - API methods: `views.open` (for reference only — not called in this task).
@@ -1111,6 +1112,14 @@ Recorded so a future pass through this backlog doesn't re-propose them:
   both **O-01** and a documented forwarding mechanism from the channel
   plugin that doesn't exist today — track as a future cross-plugin
   architecture question, not a task on this list.
+- **A `slack_modal_open` (`views.open`) agent tool (M-10).** `views.open`
+  needs a `trigger_id` from a live interaction that expires in 3 seconds. The
+  bundled channel plugin owns the Socket Mode connection that receives those
+  payloads and redacts trigger IDs from agent context; `toolContext` has no
+  such field. Fully gated on (a) a channel-plugin relay of `trigger_id` to
+  this plugin and (b) the **O-01** entry migration, and even then the modal
+  would be opened by a plugin interactive handler reacting to a button
+  click, not by an agent tool call. No build task is scheduled.
 - **A `slack_list_discovery` tool (L-07).** Slack has no documented method
   that enumerates Lists in a workspace or channel. Callers must already know a
   `list_id` (from `slack_list_create` or a shared link); `search.files` may
