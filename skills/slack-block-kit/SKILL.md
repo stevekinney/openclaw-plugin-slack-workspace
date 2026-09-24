@@ -33,7 +33,7 @@ each path does something the other doesn't.
 | Reach for | When |
 |---|---|
 | Core `presentation` | You're replying in the current conversation. It's portable to other channels and more resilient: it splits more than 2 charts across follow-up messages and, on `invalid_blocks`, strips the blocks and re-sends as text. |
-| These tools | You need to post proactively (another channel, a DM, from automation or a cron job) or edit a card in place with `updateTs`. The reply-turn `presentation` path does neither. |
+| These tools | You need to post proactively (another channel, a DM, from automation or a cron job) or edit a card in place (`updateTs`, or `slack_blocks_update` for raw blocks). The reply-turn `presentation` path does neither. |
 
 The tools share Slack's limits with core — 1–20 columns, 1–200 rows, 10,000
 characters of cell text per table, 2 charts per message — and reject over-limit
@@ -54,9 +54,14 @@ items; `code` sections are posted verbatim.
 
 ## Keep one card current
 
-All five tools accept `updateTs`. Post once, keep the returned `ts`, then pass it as
-`updateTs` to rewrite that message in place. A six-step task should be one card that
-changes, not six messages.
+`slack_post_table`, `slack_post_plan`, `slack_post_chart`, and `slack_post_rich_text`
+accept `updateTs`. Post once, keep the returned `ts`, then pass it as `updateTs` to
+rewrite that message in place. A six-step task should be one card that changes, not
+six messages.
+
+`slack_blocks_send` does not take `updateTs`: it only posts new messages. To edit a
+raw-blocks message, call `slack_blocks_update` with the `ts` that `slack_blocks_send`
+returned.
 
 ## Link previews
 
@@ -64,7 +69,7 @@ New posts from all five tools set `unfurl_links` and `unfurl_media` to `false`,
 matching the Slack channel plugin's replies, so a URL in a table cell or plan step
 doesn't expand into a preview. Pass `unfurlLinks: true` or `unfurlMedia: true` when
 you want the preview. Both are ignored with `updateTs`: an edit keeps the original
-post's unfurl behavior.
+post's unfurl behavior, and so does `slack_blocks_update`.
 
 ## Message metadata
 
@@ -77,8 +82,8 @@ succeeds, just without the metadata.
 
 To find a stamped card again, call `slack_message_get` with the `channelId` and
 `eventType`, plus `matchPayload` (e.g. `{ "taskId": "T-1" }`) to pick one card.
-It returns matches newest first, each with the `ts` to pass as `updateTs`, so you
-don't need to remember timestamps. Pass `threadTs` to search one thread. The tool
+It returns matches newest first, each with the `ts` to pass as `updateTs` (or as
+`ts` to `slack_blocks_update`), so you don't need to remember timestamps. Pass `threadTs` to search one thread. The tool
 reads history each time you call it. Slack doesn't push anything when metadata
 changes. If `truncated` is true, it stopped before the end of the history. Narrow
 the search with `oldest`/`latest` or raise `maxPages`.
