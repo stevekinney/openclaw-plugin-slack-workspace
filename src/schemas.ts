@@ -69,7 +69,7 @@ export const unfurlParams = {
 export const replyBroadcastParam = Type.Optional(
   Type.Boolean({
     description:
-      "With threadTs, also surface the reply in the parent channel. Ignored with updateTs.",
+      "With threadTs, also surface the reply in the parent channel. Ignored without threadTs or with updateTs.",
   }),
 );
 

@@ -321,6 +321,17 @@ describe("reply broadcast on structured posts", () => {
     });
   });
 
+  it.each([
+    ["slack_post_table", { ...table, threadTs: undefined }],
+    ["slack_blocks_send", { ...target, text: "t", blocks: [{ type: "divider" }] }],
+  ])("%s omits reply_broadcast without threadTs", async (name, args) => {
+    await withMockFetch(ok, async (calls) => {
+      await runTool(name, { ...args, replyBroadcast: true });
+      expect(calls[0].method).toBe("chat.postMessage");
+      expect(calls[0].body).not.toHaveProperty("reply_broadcast");
+    });
+  });
+
   it("does not send reply_broadcast to chat.update", async () => {
     await withMockFetch(ok, async (calls) => {
       await runTool("slack_post_table", {

@@ -103,7 +103,7 @@ async function postOrUpdate(
     };
   }
   if (args.threadTs) body.thread_ts = args.threadTs;
-  if (args.replyBroadcast) body.reply_broadcast = true;
+  if (args.threadTs && args.replyBroadcast) body.reply_broadcast = true;
   body.unfurl_links = args.unfurlLinks ?? false;
   body.unfurl_media = args.unfurlMedia ?? false;
   const data = await callSlack("chat.postMessage", token, body, context);
@@ -396,7 +396,7 @@ export const messagingTools = (tool: ToolFactory) => [
         unfurl_media: unfurlMedia ?? false,
       };
       if (threadTs) body.thread_ts = threadTs;
-      if (replyBroadcast) body.reply_broadcast = true;
+      if (threadTs && replyBroadcast) body.reply_broadcast = true;
       const data = await callSlack(
         "chat.postMessage",
         resolveToken(config, "bot"),
