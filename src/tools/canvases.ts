@@ -1,9 +1,19 @@
 import { Type } from "typebox";
-import { callSlack, resolveToken } from "../client.js";
+import {
+  callSlack,
+  canvasPermalink,
+  resolveToken,
+  workspaceFor,
+  type SlackCallContext,
+} from "../client.js";
 import type { ApprovalRule } from "../approvals.js";
 import { channelIdParam, type ToolFactory } from "../schemas.js";
 
-const canvasUrl = (canvasId: string) => `https://slack.com/docs/${canvasId}`;
+/** Null when the workspace can't be looked up: better no link than one that 404s. */
+async function canvasUrl(token: string, canvasId: string, context: SlackCallContext) {
+  const workspace = await workspaceFor(token, context);
+  return workspace ? canvasPermalink(workspace, canvasId) : null;
+}
 
 export const canvasTools = (tool: ToolFactory) => [
   tool({
@@ -26,7 +36,7 @@ export const canvasTools = (tool: ToolFactory) => [
     outputSchema: Type.Object(
       {
         canvasId: Type.String(),
-        url: Type.String(),
+        url: Type.Union([Type.String(), Type.Null()]),
         sharedWith: Type.Union([Type.String(), Type.Null()]),
       },
       { additionalProperties: false },
@@ -56,7 +66,11 @@ export const canvasTools = (tool: ToolFactory) => [
           context,
         );
       }
-      return { canvasId, url: canvasUrl(canvasId), sharedWith: channelId ?? null };
+      return {
+        canvasId,
+        url: await canvasUrl(token, canvasId, context),
+        sharedWith: channelId ?? null,
+      };
     },
   }),
 
@@ -85,7 +99,11 @@ export const canvasTools = (tool: ToolFactory) => [
       ),
     }),
     outputSchema: Type.Object(
-      { canvasId: Type.String(), operation: Type.String(), url: Type.String() },
+      {
+        canvasId: Type.String(),
+        operation: Type.String(),
+        url: Type.Union([Type.String(), Type.Null()]),
+      },
       { additionalProperties: false },
     ),
     async execute({ canvasId, operation, markdown, title, sectionId }, config, context) {
@@ -100,7 +118,7 @@ export const canvasTools = (tool: ToolFactory) => [
           { canvas_id: canvasId, changes: [{ operation: "rename", title_content: title }] },
           context,
         );
-        return { canvasId, operation, url: canvasUrl(canvasId) };
+        return { canvasId, operation, url: await canvasUrl(token, canvasId, context) };
       }
 
       if (!markdown) throw new Error(`${operation} requires markdown.`);
@@ -122,7 +140,7 @@ export const canvasTools = (tool: ToolFactory) => [
         { canvas_id: canvasId, changes: [change] },
         context,
       );
-      return { canvasId, operation, url: canvasUrl(canvasId) };
+      return { canvasId, operation, url: await canvasUrl(token, canvasId, context) };
     },
   }),
 
