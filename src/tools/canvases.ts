@@ -8,6 +8,7 @@ import {
   type SlackCallContext,
 } from "../client.js";
 import type { ApprovalRule } from "../approvals.js";
+import { cursorParams, toPage, walkPages } from "../pagination.js";
 import { CHANNEL_ID_DESCRIPTION, type ToolFactory } from "../schemas.js";
 
 /** Null when the workspace can't be looked up: better no link than one that 404s. */
@@ -125,23 +126,36 @@ export async function createCanvas(
     context,
   );
   const canvasId = String(created.canvas_id ?? "");
-  const shareTo = channelIds?.length ? channelIds : undefined;
-  let shareError: string | undefined;
-  if (shareTo) {
-    try {
-      await setCanvasAccess(token, canvasId, { channelIds: shareTo }, accessLevel ?? "write", context);
-    } catch (error) {
-      // Cancellation isn't a share failure: honor it rather than returning a result.
-      context.signal?.throwIfAborted();
-      shareError = error instanceof Error ? error.message : String(error);
-    }
-  }
-  return {
+  const shared = await shareCanvas(
+    token,
     canvasId,
-    url: await canvasUrl(token, canvasId, context),
-    sharedWith: shareError === undefined ? (shareTo ?? null) : null,
-    ...(shareError === undefined ? {} : { shareError }),
-  };
+    channelIds?.length ? { channelIds } : undefined,
+    accessLevel ?? "write",
+    context,
+  );
+  return { canvasId, url: await canvasUrl(token, canvasId, context), ...shared };
+}
+
+/**
+ * Share a canvas that already exists. A failure is reported, not thrown: the canvas
+ * is there either way, and the caller still needs its ID to retry sharing or clean up.
+ */
+async function shareCanvas(
+  token: string,
+  canvasId: string,
+  target: CanvasAccessTarget | undefined,
+  accessLevel: CanvasAccessLevel,
+  context: SlackCallContext,
+): Promise<{ sharedWith: string[] | null; shareError?: string }> {
+  if (!target) return { sharedWith: null };
+  try {
+    await setCanvasAccess(token, canvasId, target, accessLevel, context);
+  } catch (error) {
+    // Cancellation isn't a share failure: honor it rather than returning a result.
+    context.signal?.throwIfAborted();
+    return { sharedWith: null, shareError: error instanceof Error ? error.message : String(error) };
+  }
+  return { sharedWith: "channelIds" in target ? target.channelIds : target.userIds };
 }
 
 /** The channel's native canvas tab ID from `conversations.info`, or null if it has none yet. */
@@ -185,6 +199,133 @@ async function channelCanvasGetOrCreate(
     return { canvasId: raced, created: false };
   }
 }
+
+/** One thread message, curated to what a transcript needs. */
+export type ThreadMessage = {
+  ts: string;
+  /** A person (by user ID) or, for bots and integrations, a display name. */
+  author: { userId: string } | { name: string };
+  text: string;
+};
+
+type SlackMessage = {
+  ts?: unknown;
+  user?: unknown;
+  username?: unknown;
+  bot_id?: unknown;
+  bot_profile?: { name?: unknown };
+  text?: unknown;
+};
+
+/** Replies per `conversations.replies` page; Slack allows up to 1000. */
+const THREAD_PAGE_LIMIT = 200;
+
+/**
+ * Read a whole thread, parent first, via `conversations.replies`. Stops after
+ * `maxPages` pages and says so with `truncated`. Thread-reading tools share this
+ * rather than calling `conversations.replies` themselves.
+ */
+export async function fetchThread(
+  token: string,
+  channelId: string,
+  threadTs: string,
+  context: SlackCallContext,
+  { maxPages }: { maxPages?: number } = {},
+): Promise<{ messages: ThreadMessage[]; truncated: boolean }> {
+  const page = await walkPages<SlackMessage>(
+    async (request) =>
+      toPage(
+        await callSlack(
+          "conversations.replies",
+          token,
+          { channel: channelId, ts: threadTs, ...cursorParams(request) },
+          context,
+          true,
+        ),
+        "messages",
+      ),
+    { limit: THREAD_PAGE_LIMIT, maxPages, signal: context.signal },
+  );
+  const messages = page.items.map((message): ThreadMessage => {
+    const name = message.username ?? message.bot_profile?.name ?? message.bot_id;
+    return {
+      ts: String(message.ts ?? ""),
+      author:
+        typeof message.user === "string" && message.user
+          ? { userId: message.user }
+          : { name: typeof name === "string" && name ? name : "unknown" },
+      text: typeof message.text === "string" ? message.text : "",
+    };
+  });
+  return { messages, truncated: page.hasMore };
+}
+
+/** Slack mrkdwn to canvas markdown: mentions, channel links, links, and HTML entities. */
+function canvasText(text: string) {
+  return text
+    .replace(/<@([A-Z0-9]+)(?:\|[^>]*)?>/g, "![](@$1)")
+    .replace(/<#([A-Z0-9]+)(?:\|[^>]*)?>/g, "![](#$1)")
+    .replace(/<!([^|>]+)(?:\|([^>]+))?>/g, (_, name: string, label?: string) => label ?? `@${name}`)
+    .replace(/<([^|>]+)\|([^>]+)>/g, "[$2]($1)")
+    .replace(/<([^>]+)>/g, "$1")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+/** A Slack `ts` as a UTC minute, e.g. `2024-09-10 20:26 UTC`. */
+function utcMinute(ts: string) {
+  const date = new Date(Number(ts) * 1000);
+  return Number.isNaN(date.getTime())
+    ? ts
+    : `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
+/**
+ * A thread as canvas markdown: an optional caller-written summary, then a source line
+ * and every message as a quoted block. With `heading`, everything nests under it,
+ * so a thread appended to an existing canvas reads as one section.
+ */
+export function threadMarkdown({
+  channelId,
+  messages,
+  summary,
+  heading,
+  permalink,
+  truncated,
+}: {
+  channelId: string;
+  messages: ThreadMessage[];
+  summary?: string;
+  heading?: string;
+  permalink: string | null;
+  truncated: boolean;
+}) {
+  const level = heading ? "###" : "##";
+  const count = messages.length;
+  const source = [
+    `${count} message${count === 1 ? "" : "s"} in ![](#${channelId})`,
+    ...(permalink ? [`[Open in Slack](${permalink})`] : []),
+    ...(truncated ? [`only the first ${count} were fetched`] : []),
+  ].join(" · ");
+  const transcript = messages.map((message) => {
+    const author = "userId" in message.author ? `![](@${message.author.userId})` : message.author.name;
+    const text = canvasText(message.text).trim() || "_(no text)_";
+    const quoted = text.split("\n").map((line) => (line ? `> ${line}` : ">"));
+    return [`**${author}** · ${utcMinute(message.ts)}`, ...quoted].join("\n");
+  });
+  return [
+    ...(heading ? [`## ${heading}`] : []),
+    ...(summary ? [`${level} Summary`, summary.trim()] : []),
+    `${level} Thread`,
+    source,
+    ...transcript,
+  ].join("\n\n");
+}
+
+/** A thread's web link: `/archives/<channel>/p<ts without the dot>`. */
+const threadPermalink = (origin: string, channelId: string, threadTs: string) =>
+  `${origin}/archives/${channelId}/p${threadTs.replace(".", "")}`;
 
 export const canvasTools = (tool: ToolFactory) => [
   tool({
@@ -460,6 +601,112 @@ export const canvasTools = (tool: ToolFactory) => [
         context,
       );
       return { canvasId, channelId, created, url: await canvasUrl(token, canvasId, context) };
+    },
+  }),
+  tool({
+    name: "slack_canvas_from_thread",
+    label: "Create Slack canvas from thread",
+    description:
+      "Turn a Slack thread into a canvas: fetch every message, write your summary (if given) above a transcript with a link back to the thread, then create a new canvas or append to canvasId. A new canvas is shared with the thread's channel unless channelIds or userIds say otherwise; an appended one is shared only when they are set. If sharing fails, the canvas still exists: the result has sharedWith null and a shareError.",
+    parameters: Type.Object({
+      channelId: Type.String({ description: CHANNEL_ID_DESCRIPTION }),
+      threadTs: Type.String({
+        description: "Timestamp of the thread's parent message, e.g. 1726000000.000100.",
+      }),
+      title: Type.Optional(
+        Type.String({
+          description:
+            "Canvas title, or the section heading when appending. Default: Thread summary and the thread's date.",
+        }),
+      ),
+      summary: Type.Optional(
+        Type.String({
+          description: "Your markdown summary of the thread (decisions, action items), placed above the transcript.",
+        }),
+      ),
+      canvasId: Type.Optional(
+        Type.String({ description: "Append to this canvas instead of creating one, e.g. F0166DCSTS7." }),
+      ),
+      ...canvasTargetParams("share the canvas with"),
+      accessLevel: Type.Optional(
+        Type.Union([Type.Literal("read"), Type.Literal("write"), Type.Literal("owner")], {
+          description: "Access to grant when sharing. owner is valid for userIds only. Default: write.",
+        }),
+      ),
+    }),
+    outputSchema: Type.Object(
+      {
+        canvasId: Type.String(),
+        created: Type.Boolean(),
+        url: Type.Union([Type.String(), Type.Null()]),
+        messageCount: Type.Integer(),
+        truncated: Type.Boolean({ description: "True if the thread was too long to fetch in full." }),
+        sharedWith: Type.Union([Type.Array(Type.String()), Type.Null()]),
+        shareError: Type.Optional(Type.String()),
+      },
+      { additionalProperties: false },
+    ),
+    async execute(
+      { channelId, threadTs, title, summary, canvasId, channelIds, userIds, accessLevel },
+      config,
+      context,
+    ) {
+      context.signal?.throwIfAborted();
+      // Validate sharing up front so a bad target never leaves a half-made canvas behind.
+      const explicit =
+        channelIds?.length || userIds?.length ? canvasAccessTarget(channelIds, userIds) : undefined;
+      const target = explicit ?? (canvasId ? undefined : { channelIds: [channelId] });
+      const level = accessLevel ?? "write";
+      if (level === "owner" && !(target && "userIds" in target)) {
+        throw new Error("owner access can only be granted to users, not channels.");
+      }
+
+      const token = resolveToken(config);
+      const { messages, truncated } = await fetchThread(token, channelId, threadTs, context);
+      if (!messages.length) {
+        throw new Error(`No messages found in thread ${threadTs} of ${channelId}.`);
+      }
+      const workspace = await workspaceFor(token, context);
+      const heading = title ?? `Thread summary · ${utcMinute(messages[0]!.ts).slice(0, 10)}`;
+      const markdown = threadMarkdown({
+        channelId,
+        messages,
+        summary,
+        heading: canvasId ? heading : undefined,
+        permalink: workspace ? threadPermalink(workspace.origin, channelId, threadTs) : null,
+        truncated,
+      });
+
+      let targetCanvasId: string;
+      if (canvasId) {
+        await callSlack(
+          "canvases.edit",
+          token,
+          {
+            canvas_id: canvasId,
+            changes: [{ operation: "insert_at_end", document_content: { type: "markdown", markdown } }],
+          },
+          context,
+        );
+        targetCanvasId = canvasId;
+      } else {
+        const created = await callSlack(
+          "canvases.create",
+          token,
+          { title: heading, document_content: { type: "markdown", markdown } },
+          context,
+        );
+        targetCanvasId = String(created.canvas_id ?? "");
+      }
+      const shared = await shareCanvas(token, targetCanvasId, target, level, context);
+      return {
+        canvasId: targetCanvasId,
+        created: !canvasId,
+        url: await canvasUrl(token, targetCanvasId, context),
+        messageCount: messages.length,
+        truncated,
+        ...shared,
+      };
     },
   }),
 ];
