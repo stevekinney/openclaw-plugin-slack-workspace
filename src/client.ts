@@ -12,8 +12,16 @@ export type PluginConfig = {
  * user tokens (xoxp-) act as Steve. Methods like search.* and reminders.* reject
  * bot tokens outright with `not_allowed_token_type`, so each tool declares which
  * identity it needs rather than hoping one token covers everything.
+ *
+ * A token whose prefix doesn't match `kind` (say, a user token pasted into `botToken`)
+ * only warns: Slack could change its prefixes, and a hard failure here would break a
+ * working setup. Without the warning, the mistake surfaces later as an opaque Slack error.
  */
-export function resolveToken(config: PluginConfig, kind: "bot" | "user" = "bot"): string {
+export function resolveToken(
+  config: PluginConfig,
+  kind: "bot" | "user" = "bot",
+  warn: (message: string) => void = console.warn,
+): string {
   const field = kind === "bot" ? "botToken" : "userToken";
   const envVar = kind === "bot" ? "SLACK_BOT_TOKEN" : "SLACK_USER_TOKEN";
   const configured = config[field];
@@ -28,8 +36,25 @@ export function resolveToken(config: PluginConfig, kind: "bot" | "user" = "bot")
       `No Slack ${kind} token. Set plugins.entries.slack-workspace.config.${field} (SecretRef) or ${envVar}.`,
     );
   }
+  const expected = TOKEN_PREFIXES[kind];
+  if (!token.startsWith(expected) && !warnedTokens.has(token)) {
+    warnedTokens.add(token);
+    const source = configured?.trim()
+      ? `plugins.entries.slack-workspace.config.${field}`
+      : envVar;
+    // Only echo a recognizable Slack prefix; anything else could be part of the secret.
+    const actual = /^xox[a-z]-/.exec(token)?.[0];
+    warn(
+      `slack-workspace: the Slack ${kind} token ${actual ? `starts with ${actual}` : "has an unrecognized prefix"}, but ${kind} tokens start with ${expected}. Check ${source}.`,
+    );
+  }
   return token;
 }
+
+const TOKEN_PREFIXES = { bot: "xoxb-", user: "xoxp-" } as const;
+
+/** Tokens already warned about, so a misconfiguration warns once rather than per call. */
+const warnedTokens = new Set<string>();
 
 type PluginLogger = {
   debug?: (message: string) => void;
