@@ -254,6 +254,40 @@ describe("slack_post_chart", () => {
   });
 });
 
+describe("link unfurling on proactive posts", () => {
+  const table = { ...target, caption: "Links", columns: ["url"], rows: [["https://example.com"]] };
+  const blocks = { ...target, text: "hi", blocks: [{ type: "divider" }] };
+
+  it.each([
+    ["slack_post_table", table],
+    ["slack_blocks_send", blocks],
+  ])("%s turns unfurling off by default", async (name, args) => {
+    await withMockFetch(ok, async (calls) => {
+      await runTool(name, args);
+      expect(calls[0].body).toMatchObject({ unfurl_links: false, unfurl_media: false });
+    });
+  });
+
+  it.each([
+    ["slack_post_table", table],
+    ["slack_blocks_send", blocks],
+  ])("%s forwards explicit unfurl overrides", async (name, args) => {
+    await withMockFetch(ok, async (calls) => {
+      await runTool(name, { ...args, unfurlLinks: true, unfurlMedia: true });
+      expect(calls[0].body).toMatchObject({ unfurl_links: true, unfurl_media: true });
+    });
+  });
+
+  it("does not send unfurl flags to chat.update, which does not accept them", async () => {
+    await withMockFetch(ok, async (calls) => {
+      await runTool("slack_post_table", { ...table, updateTs: "1700000000.000100" });
+      expect(calls[0].method).toBe("chat.update");
+      expect(calls[0].body).not.toHaveProperty("unfurl_links");
+      expect(calls[0].body).not.toHaveProperty("unfurl_media");
+    });
+  });
+});
+
 describe("slack_schedule_message postAt bounds", () => {
   const now = new Date("2026-09-23T12:00:00Z");
   const nowSeconds = Math.floor(now.getTime() / 1000);

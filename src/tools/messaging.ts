@@ -6,6 +6,7 @@ import {
   postResultSchema,
   targetParams,
   threadTsParam,
+  unfurlParams,
   type ToolFactory,
 } from "../schemas.js";
 
@@ -79,6 +80,8 @@ async function postOrUpdate(
     blocks: unknown[];
     threadTs?: string;
     updateTs?: string;
+    unfurlLinks?: boolean;
+    unfurlMedia?: boolean;
   },
   context?: SlackCallContext,
 ): Promise<{ channelId: string; ts: string; updated: boolean }> {
@@ -98,6 +101,8 @@ async function postOrUpdate(
     };
   }
   if (args.threadTs) body.thread_ts = args.threadTs;
+  body.unfurl_links = args.unfurlLinks ?? false;
+  body.unfurl_media = args.unfurlMedia ?? false;
   const data = await callSlack("chat.postMessage", token, body, context);
   // A user ID opens a DM; Slack returns the resolved D… channel, which follow-up calls need.
   return { channelId: String(data.channel ?? args.channelId), ts: String(data.ts ?? ""), updated: false };
@@ -131,7 +136,7 @@ export const messagingTools = (tool: ToolFactory) => [
     }),
     outputSchema: postResultSchema,
     async execute(
-      { channelId, caption, columns, rows, pageSize, threadTs, updateTs },
+      { channelId, caption, columns, rows, pageSize, threadTs, updateTs, unfurlLinks, unfurlMedia },
       config,
       context,
     ) {
@@ -166,6 +171,8 @@ export const messagingTools = (tool: ToolFactory) => [
           blocks: [table],
           threadTs,
           updateTs,
+          unfurlLinks,
+          unfurlMedia,
         },
         context,
       );
@@ -203,7 +210,11 @@ export const messagingTools = (tool: ToolFactory) => [
       ),
     }),
     outputSchema: postResultSchema,
-    async execute({ channelId, title, tasks, threadTs, updateTs }, config, context) {
+    async execute(
+      { channelId, title, tasks, threadTs, updateTs, unfurlLinks, unfurlMedia },
+      config,
+      context,
+    ) {
       context.signal?.throwIfAborted();
       // Slack wants a fresh block_id on every revision of a message.
       const revision = Date.now().toString(36);
@@ -228,6 +239,8 @@ export const messagingTools = (tool: ToolFactory) => [
           blocks: [plan],
           threadTs,
           updateTs,
+          unfurlLinks,
+          unfurlMedia,
         },
         context,
       );
@@ -335,6 +348,8 @@ export const messagingTools = (tool: ToolFactory) => [
           blocks: [{ type: "data_visualization", title, chart }],
           threadTs: args.threadTs,
           updateTs: args.updateTs,
+          unfurlLinks: args.unfurlLinks,
+          unfurlMedia: args.unfurlMedia,
         },
         context,
       );
@@ -359,14 +374,25 @@ export const messagingTools = (tool: ToolFactory) => [
           description: "With threadTs, also surface the reply in the parent channel.",
         }),
       ),
+      ...unfurlParams,
     }),
     outputSchema: Type.Object(
       { channelId: Type.String(), ts: Type.String(), blockCount: Type.Number() },
       { additionalProperties: false },
     ),
-    async execute({ channelId, text, blocks, threadTs, replyBroadcast }, config, context) {
+    async execute(
+      { channelId, text, blocks, threadTs, replyBroadcast, unfurlLinks, unfurlMedia },
+      config,
+      context,
+    ) {
       context.signal?.throwIfAborted();
-      const body: Record<string, unknown> = { channel: channelId, text, blocks };
+      const body: Record<string, unknown> = {
+        channel: channelId,
+        text,
+        blocks,
+        unfurl_links: unfurlLinks ?? false,
+        unfurl_media: unfurlMedia ?? false,
+      };
       if (threadTs) body.thread_ts = threadTs;
       if (replyBroadcast) body.reply_broadcast = true;
       const data = await callSlack(
