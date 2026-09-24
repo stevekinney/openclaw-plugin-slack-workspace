@@ -135,7 +135,8 @@
       "slack_channel_join",
       "slack_channel_leave",
       "slack_channel_kickoff",
-      "slack_list_create"
+      "slack_list_create",
+      "slack_list_schema"
     ]
   },
   "toolMetadata": {
@@ -366,6 +367,13 @@
     "slack_list_create": {
       "sideEffecting": true,
       "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_list_schema": {
+      "sideEffecting": false,
+      "replaySafe": true,
       "profiles": [
         "messaging"
       ]
