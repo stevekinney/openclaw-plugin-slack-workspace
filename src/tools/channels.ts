@@ -438,7 +438,7 @@ export const channelTools = (tool: ToolFactory) => [
       let canvasResult: Awaited<ReturnType<typeof createCanvas>> | null = null;
       if (canvas) {
         await run("canvas", async () => {
-          canvasResult = await createCanvas(token, { ...canvas, channelId: channel.id }, context);
+          canvasResult = await createCanvas(token, { ...canvas, channelIds: [channel.id] }, context);
           return canvasResult.shareError;
         });
       }
