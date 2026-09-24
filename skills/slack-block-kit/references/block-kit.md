@@ -31,7 +31,7 @@ Tested by posting through `slack_blocks_send`. "Posts" = Slack accepted it in a 
 - `data_table` `raw_number` cells require **both** `value` (number) and `text` (string).
   Sending only one fails with `invalid_blocks`.
 - `data_table` header row (row 0) must be `raw_text`; `rich_text` is not allowed in header cells.
-- `data_table` needs 2–201 rows (header + 1..200) and 1–20 columns, all rows the same length.
+- `data_table` needs 2–201 rows (header + 1..200) and 1–20 columns, all rows the same length, with at most 10,000 characters of cell text across the whole table (header included).
 - `task_card`/`plan` `block_id` should change on every message update.
 - `data_visualization` `title` max 50 chars; pie segments max 12, labels max 20 chars.
 

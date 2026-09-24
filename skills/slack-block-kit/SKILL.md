@@ -22,6 +22,29 @@ The first three take plain values and build the Block Kit JSON for you. Reach fo
 `slack_blocks_send` only when none of them fit — it takes raw blocks and expects you
 to know the schema.
 
+## These tools or core `presentation`?
+
+OpenClaw's core `presentation` contract also renders chart and table blocks, as
+the same native `data_visualization` and `data_table`, when the reply lands in
+Slack. It overlaps with `slack_post_table` and `slack_post_chart` on purpose;
+each path does something the other doesn't.
+
+| Reach for | When |
+|---|---|
+| Core `presentation` | You're replying in the current conversation. It's portable to other channels and more resilient: it splits more than 2 charts across follow-up messages and, on `invalid_blocks`, strips the blocks and re-sends as text. |
+| These tools | You need to post proactively (another channel, a DM, from automation or a cron job) or edit a card in place with `updateTs`. The reply-turn `presentation` path does neither. |
+
+The tools share Slack's limits with core — 1–20 columns, 1–200 rows, 10,000
+characters of cell text per table, 2 charts per message — and reject over-limit
+input before calling Slack. They don't copy core's recovery: an over-limit or
+rejected post fails with an error for you to fix. Post a third chart as a
+separate `slack_post_chart` call.
+
+For contributors: don't close this gap by re-implementing the channel plugin's
+splitting and text fallback here. Two copies of that logic will drift. Keep
+these tools to what `presentation` can't do, and send everything else through
+core.
+
 ## Keep one card current
 
 All four tools accept `updateTs`. Post once, keep the returned `ts`, then pass it as

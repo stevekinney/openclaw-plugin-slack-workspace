@@ -27,7 +27,10 @@ const truncated = (items: string[], limit: number, noun = "") =>
     ? [...items.slice(0, limit), `…and ${items.length - limit} more${noun}`]
     : items;
 
-const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+/** Slack's aggregate limit on the text of every cell in a data_table. */
+const MAX_TABLE_CHARACTERS = 10_000;
+
+const plural =(count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
 /**
  * `text` is what notifications show and what search indexes for block-only
@@ -148,6 +151,17 @@ export const messagingTools = (tool: ToolFactory) => [
       if (bad !== -1) {
         throw new Error(
           `Row ${bad} has ${rows[bad].length} cells but there are ${columns.length} columns. Slack requires every row to match the header width.`,
+        );
+      }
+      // Slack also caps the table's total cell text, header included. Core's presentation
+      // renderer enforces the same limit; fail before the network rather than on invalid_blocks.
+      const characters = [...columns, ...rows.flat()].reduce<number>(
+        (total, cell) => total + String(cell).length,
+        0,
+      );
+      if (characters > MAX_TABLE_CHARACTERS) {
+        throw new Error(
+          `Table cells total ${characters} characters; Slack caps a data_table at ${MAX_TABLE_CHARACTERS}. Trim long cells or split the rows across tables.`,
         );
       }
       // raw_number needs BOTH value and text; sending either alone fails validation.
