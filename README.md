@@ -252,6 +252,24 @@ Slack has no method to edit a scheduled message, so `slack_schedule_reschedule` 
 
 `openclaw slack-workspace doctor` calls the read-only `auth.test` once per configured token and compares the scopes Slack actually granted against what each tool needs. Missing scopes are listed with the tools they break. This catches a Slack app whose manifest gained scopes that were never reinstalled. Pass `--json` for machine-readable output. The command exits non-zero on any gap, unavailable token, or rejected token. The per-tool requirements live in `TOOL_SCOPES` in `src/doctor.ts`. When you add a tool, add its entry there; a test fails if one is missing.
 
+## Scheduled digests
+
+To turn a recurring automation's N messages into one card that gets edited each run, have it look up its card with `slack_message_get` and post with `updateTs`. The steps and an example prompt are under "Scheduled-digest recipe" in [`skills/slack-block-kit/SKILL.md`](skills/slack-block-kit/SKILL.md).
+
+## Not built on purpose
+
+These gaps are deliberate decisions, not oversights. Read the matching entry under "Explicitly out of scope" in `ROADMAP.md` before proposing any of them again.
+
+- **Legacy message `attachments`.** Slack deprecated them in favor of Block Kit for new development. No tool takes an `attachments` parameter, and none should.
+- **Anything the bundled Slack channel plugin already owns.** That covers pins, reactions, the emoji list, member info, in-turn file upload and download, opening a conversation for ordinary chat, assistant thread status (`assistant.threads.setStatus`), and App Home (`views.publish`). A second `views.publish` would race the channel plugin's own Home view.
+- **Per-message personas (`chat:write.customize`) and dedicated `chat:write.public` or `users:write` features.** The owner dropped them.
+- **Link unfurling and Work Objects (`chat.unfurl`).** They need a `link_shared` event that this app doesn't subscribe to, relayed from the channel plugin's Socket Mode connection, plus a registered unfurl domain. None of those exist.
+- **Workflow Steps.** Slack retired legacy steps from apps (`workflow.steps:execute`) in September 2024. Modern custom steps (`functions.completeSuccess`) need Socket Mode handlers, and the channel plugin owns this app's only connection.
+- **A modal tool (`views.open`).** It needs a 3-second `trigger_id` from a live interaction. The channel plugin redacts that ID from agent context.
+- **Trigger management (`workflows.triggers.*`).** Those methods only target workflows in this app's own manifest, never Workflow Builder ones. Use `slack_workflow_trigger_run` instead.
+- **Workflow templates and `mcp:connect` tools.** No Web API method uses these scopes.
+- **List discovery.** No Slack method lists the Lists in a workspace. You need the `list_id` already.
+
 ## Development
 
 ### Build

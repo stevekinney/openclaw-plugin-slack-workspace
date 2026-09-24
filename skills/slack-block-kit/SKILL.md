@@ -88,6 +88,48 @@ reads history each time you call it. Slack doesn't push anything when metadata
 changes. If `truncated` is true, it stopped before the end of the history. Narrow
 the search with `oldest`/`latest` or raise `maxPages`.
 
+## Scheduled-digest recipe
+
+A recurring automation (an `openclaw automations` cron job) that posts a fresh
+plain-text message every run fills the channel with N near-identical messages.
+Rewrite its prompt so every run edits one card instead:
+
+1. Look for the card: `slack_message_get` with the channel, a fixed `eventType`,
+   and `matchPayload` naming this digest.
+2. If there's a match, post with `updateTs` set to its `ts`. If not, post new and
+   stamp it with the same `metadata`. Either way it's one call.
+3. For history worth keeping, append the run's summary to a canvas with
+   `slack_canvas_edit` (`operation: "append"`) rather than posting it.
+
+A run can't remember the last run's `ts`. The metadata lookup is how it finds the
+card again. Example prompt for the automation:
+
+```text
+Build the daily open-PR digest for channel C0123ABCD.
+Call slack_message_get with channelId C0123ABCD, eventType "openclaw_digest",
+matchPayload { "digest": "open-prs" }. Then call slack_post_table with columns
+["PR", "Author", "Age (days)"], one row per open PR, caption "Open PRs, updated
+<today>", and metadata { eventType: "openclaw_digest", eventPayload:
+{ "digest": "open-prs" } }. If slack_message_get returned a match, pass its ts as
+updateTs. Then call slack_canvas_edit on canvas F0456EFGH with operation
+"append" and markdown "## <today>\n- <count> open PRs, oldest <n> days".
+Post nothing else.
+```
+
+The `eventType` must be registered under the app manifest's
+`metadata.event_subscriptions`, or Slack drops the metadata and the lookup finds
+nothing, so every run posts a new card. If you can't register one, keep a single
+known `ts` in the automation's prompt and pass it as `updateTs`. Swap in
+`slack_post_plan` or `slack_post_chart` when the digest is a checklist or a
+trend. All three take `updateTs` and `metadata`.
+
+## No legacy `attachments`
+
+None of these tools take Slack's legacy `attachments` parameter (colored
+sidebars, `fields`, `fallback`). Slack deprecated it in favor of Block Kit for
+new development. Use `context` blocks or `section` `fields` instead. For
+contributors: don't add it. See "Not built on purpose" in the README.
+
 ## Raw blocks
 
 `slack_blocks_send` passes `blocks` to Slack verbatim. `text` is required — it is the
