@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { callSlack, resolveToken } from "../client.js";
+import { callSlack, resolveToken, type PluginConfig, type SlackCallContext } from "../client.js";
 import type { ToolFactory } from "../schemas.js";
 
 /** Column types `slackLists.create` accepts in a `schema`. */
@@ -75,6 +75,101 @@ function curateColumn(raw: RawColumn) {
   };
 }
 
+/** A column as `slack_list_schema` reports it: select choices become `{ id, label }` options. */
+const slackListSchemaColumn = Type.Object(
+  {
+    id: Type.String(),
+    key: Type.String(),
+    name: Type.String(),
+    type: Type.String(),
+    primary: Type.Optional(Type.Literal(true)),
+    options: Type.Optional(
+      Type.Array(Type.Object({ id: Type.String(), label: Type.String() }, { additionalProperties: false })),
+    ),
+  },
+  { additionalProperties: false },
+);
+
+export type ListColumn = {
+  id: string;
+  key: string;
+  name: string;
+  type: string;
+  primary?: true;
+  options?: { id: string; label: string }[];
+};
+
+/** Select columns keep their choices under `options.choices`; each choice's `value` is its option ID. */
+function schemaColumn(raw: RawColumn): ListColumn {
+  const choices = (raw.options as { choices?: Record<string, unknown>[] } | undefined)?.choices;
+  return {
+    ...curateColumn(raw),
+    ...(Array.isArray(choices)
+      ? {
+          options: choices.map((choice) => ({
+            id: String(choice.value ?? ""),
+            label: String(choice.label ?? ""),
+          })),
+        }
+      : {}),
+  };
+}
+
+/**
+ * Read a list's column schema. `slackLists.items.list` with `include_list` carries the
+ * parent list object, so one item is enough; `slackLists.items.info` needs an item ID.
+ */
+export async function fetchListSchema(
+  listId: string,
+  config: PluginConfig,
+  context?: SlackCallContext,
+): Promise<{ title?: string; columns: ListColumn[] }> {
+  const data = await callSlack(
+    "slackLists.items.list",
+    resolveToken(config),
+    { list_id: listId, include_list: true, limit: 1 },
+    context,
+  );
+  const list = (data.list ?? {}) as { title?: unknown; list_metadata?: { schema?: RawColumn[] } };
+  const schema = list.list_metadata?.schema;
+  if (!Array.isArray(schema)) throw new Error(`Slack returned no schema for list ${listId}.`);
+  return {
+    ...(typeof list.title === "string" && list.title ? { title: list.title } : {}),
+    columns: schema.map(schemaColumn),
+  };
+}
+
+const normalize = (text: string) => text.trim().toLowerCase();
+
+/** Resolve a column by ID, key, or case-insensitive name, so callers can write cells by name. */
+export function findListColumn(columns: ListColumn[], name: string): ListColumn {
+  const wanted = normalize(name);
+  const column =
+    columns.find((column) => column.id === name.trim() || column.key === name.trim()) ??
+    columns.find((column) => normalize(column.name) === wanted);
+  if (!column) {
+    throw new Error(
+      `No column "${name}" in this list. Columns: ${columns.map((column) => column.name).join(", ")}.`,
+    );
+  }
+  return column;
+}
+
+/** Resolve a select option by ID or case-insensitive label to the option ID Slack stores. */
+export function findListOption(column: ListColumn, label: string): string {
+  if (!column.options) throw new Error(`Column "${column.name}" is not a select column.`);
+  const wanted = normalize(label);
+  const option =
+    column.options.find((option) => option.id === label.trim()) ??
+    column.options.find((option) => normalize(option.label) === wanted);
+  if (!option) {
+    throw new Error(
+      `No option "${label}" in column "${column.name}". Options: ${column.options.map((option) => option.label).join(", ")}.`,
+    );
+  }
+  return option.id;
+}
+
 export const listTools = (tool: ToolFactory) => [
   tool({
     name: "slack_list_create",
@@ -136,6 +231,27 @@ export const listTools = (tool: ToolFactory) => [
         listId: String(data.list_id ?? ""),
         columns: (metadata.schema ?? []).map(curateColumn),
       };
+    },
+  }),
+  tool({
+    name: "slack_list_schema",
+    label: "Read Slack list schema",
+    description:
+      "Read a Slack List's columns: each column's ID, key, name, and type, plus option IDs and labels for select columns. Use it to turn column names and option labels into the IDs item writes need.",
+    parameters: Type.Object({
+      listId: Type.String({ description: "List ID, e.g. F0123ABCD." }),
+    }),
+    outputSchema: Type.Object(
+      {
+        listId: Type.String(),
+        title: Type.Optional(Type.String()),
+        columns: Type.Array(slackListSchemaColumn),
+      },
+      { additionalProperties: false },
+    ),
+    async execute({ listId }, config, context) {
+      context.signal?.throwIfAborted();
+      return { listId, ...(await fetchListSchema(listId, config, context)) };
     },
   }),
 ];
