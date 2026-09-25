@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { auditScopes, formatDoctorReport, TOOL_SCOPES } from "./doctor.js";
+import { auditScopes, formatDoctorReport, resolveCliTokens, TOOL_SCOPES } from "./doctor.js";
 import {
   recordingLogger,
   registerPlugin,
@@ -225,5 +225,40 @@ describe("openclaw slack-workspace doctor", () => {
     );
     expect(exitCode).toBeUndefined();
     expect(JSON.parse(output)).toMatchObject({ ok: true });
+  });
+});
+
+describe("resolveCliTokens", () => {
+  const botRef = { source: "store", provider: "default", id: "slack-bot" };
+  const userRef = { source: "store", provider: "default", id: "slack-user" };
+  const hostConfig = { plugins: {} };
+
+  it("resolves SecretRef tokens through the host resolver", async () => {
+    const resolve = vi.fn(async ({ path }: { path: string }) => ({
+      value: path.endsWith("botToken") ? "xoxb-resolved" : "xoxp-resolved",
+    }));
+    const config = await resolveCliTokens({ botToken: botRef, userToken: userRef, autoJoin: false }, hostConfig, resolve, {});
+    expect(config).toEqual({ botToken: "xoxb-resolved", userToken: "xoxp-resolved", autoJoin: false });
+    expect(resolve).toHaveBeenCalledWith({
+      config: hostConfig,
+      env: {},
+      value: botRef,
+      path: "plugins.entries.slack-workspace.config.botToken",
+    });
+  });
+
+  it("leaves an unresolvable ref in place so the audit reports it as unavailable", async () => {
+    const resolve = vi.fn(async () => ({}));
+    const config = await resolveCliTokens({ botToken: botRef }, hostConfig, resolve, {});
+    expect(config.botToken).toBe(botRef);
+    const report = await auditScopes(config);
+    expect(report.tokens.find((token) => token.kind === "bot")?.status).toBe("unavailable");
+  });
+
+  it("passes plain-string and missing tokens through without calling the resolver", async () => {
+    const resolve = vi.fn(async () => ({ value: "unused" }));
+    const config = await resolveCliTokens({ botToken: "xoxb-plain" }, hostConfig, resolve, {});
+    expect(config).toEqual({ botToken: "xoxb-plain" });
+    expect(resolve).not.toHaveBeenCalled();
   });
 });
