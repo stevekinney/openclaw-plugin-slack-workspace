@@ -33,8 +33,16 @@ export type ApprovalRequest = {
   severity: "warning";
   /** No `allow-always`: this plugin does not persist trust, so every call asks. */
   allowedDecisions: ["allow-once", "deny"];
+  /** How long the prompt stays answerable before the call is blocked. */
+  timeoutMs: number;
   pluginId: string;
 };
+
+/**
+ * The host's default is 2 minutes, which was too short to notice a card posted in a
+ * busy DM: it expired and the card flipped to "Denied". 10 minutes is the host's cap.
+ */
+export const APPROVAL_TIMEOUT_MS = 600_000;
 
 /** Every tool call that needs a human's approval before it reaches Slack. */
 export const APPROVAL_RULES: readonly ApprovalRule[] = [
@@ -72,6 +80,7 @@ export function approvalFor(
       scope: { kind: "external-post", target: cleanPromptText(prompt.target, 120), visibility: "restricted" },
       severity: "warning",
       allowedDecisions: ["allow-once", "deny"],
+      timeoutMs: APPROVAL_TIMEOUT_MS,
       pluginId: PLUGIN_ID,
     };
   }
