@@ -46,6 +46,16 @@ export const APPROVAL_RULES: readonly ApprovalRule[] = [
   ...remoteFileApprovals,
 ];
 
+/**
+ * Rules interpolate raw, agent-supplied params (IDs, headings) into the prompt. Strip
+ * control characters and line breaks so a crafted value can't add lines that read as
+ * part of the prompt, and bound the length. Hosts sanitize too; this doesn't rely on it.
+ */
+export function cleanPromptText(text: string, max = 400): string {
+  const flat = text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, " ").replace(/\s{2,}/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
 /** The approval request for this call, or `undefined` if no rule gates it. */
 export function approvalFor(
   toolName: string,
@@ -56,10 +66,10 @@ export function approvalFor(
     const prompt = rule.check(params);
     if (!prompt) continue;
     return {
-      title: prompt.title,
-      description: prompt.description,
+      title: cleanPromptText(prompt.title, 120),
+      description: cleanPromptText(prompt.description),
       // Slack channels and canvases are visible inside the workspace, not to the public web.
-      scope: { kind: "external-post", target: prompt.target, visibility: "restricted" },
+      scope: { kind: "external-post", target: cleanPromptText(prompt.target, 120), visibility: "restricted" },
       severity: "warning",
       allowedDecisions: ["allow-once", "deny"],
       pluginId: PLUGIN_ID,

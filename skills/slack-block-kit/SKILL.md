@@ -76,9 +76,9 @@ post's unfurl behavior, and so does `slack_blocks_update`.
 All five tools and `slack_blocks_update` accept an optional
 `metadata: { eventType, eventPayload }`, sent as Slack's `metadata` field. Use it to
 stamp a card with a machine-readable id (task id, revision) so it can be found later
-without parsing its text. Slack silently drops metadata whose `eventType` isn't
-registered under the app manifest's `metadata.event_subscriptions`: the post still
-succeeds, just without the metadata.
+without parsing its text. Use `eventType: "openclaw_card"`, this plugin's event
+type, and tell cards apart by payload (e.g. `{ "digest": "open-prs" }`). Put
+versions in the payload, not the type name.
 
 To find a stamped card again, call `slack_message_get` with the `channelId` and
 `eventType`, plus `matchPayload` (e.g. `{ "taskId": "T-1" }`) to pick one card.
@@ -106,20 +106,18 @@ card again. Example prompt for the automation:
 
 ```text
 Build the daily open-PR digest for channel C0123ABCD.
-Call slack_message_get with channelId C0123ABCD, eventType "openclaw_digest",
+Call slack_message_get with channelId C0123ABCD, eventType "openclaw_card",
 matchPayload { "digest": "open-prs" }. Then call slack_post_table with columns
 ["PR", "Author", "Age (days)"], one row per open PR, caption "Open PRs, updated
-<today>", and metadata { eventType: "openclaw_digest", eventPayload:
+<today>", and metadata { eventType: "openclaw_card", eventPayload:
 { "digest": "open-prs" } }. If slack_message_get returned a match, pass its ts as
 updateTs. Then call slack_canvas_edit on canvas F0456EFGH with operation
 "append" and markdown "## <today>\n- <count> open PRs, oldest <n> days".
 Post nothing else.
 ```
 
-The `eventType` must be registered under the app manifest's
-`metadata.event_subscriptions`, or Slack drops the metadata and the lookup finds
-nothing, so every run posts a new card. If you can't register one, keep a single
-known `ts` in the automation's prompt and pass it as `updateTs`. Swap in
+If the lookup ever comes back empty (say, someone deleted the card), the run posts
+a fresh card and the next run finds that one. Swap in
 `slack_post_plan` or `slack_post_chart` when the digest is a checklist or a
 trend. All three take `updateTs` and `metadata`.
 

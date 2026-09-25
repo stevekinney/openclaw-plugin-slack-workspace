@@ -627,7 +627,7 @@ export const messagingTools = (tool: ToolFactory) => [
       eventType: Type.String({
         pattern: "^[A-Za-z0-9_]+$",
         maxLength: 255,
-        description: "Metadata event type to match, e.g. \"openclaw_card_v1\".",
+        description: "Metadata event type to match, usually \"openclaw_card\".",
       }),
       matchPayload: Type.Optional(
         Type.Record(Type.String(), Type.Unknown(), {

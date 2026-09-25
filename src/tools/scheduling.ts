@@ -353,6 +353,14 @@ export const schedulingTools = (tool: ToolFactory) => [
 /** A cancelled scheduled message is gone; it cannot be restored, only rescheduled. */
 export const schedulingApprovals: ApprovalRule[] = [
   {
+    toolName: "slack_schedule_reschedule",
+    check: ({ channelId, scheduledMessageId, postAt }) => ({
+      title: "Reschedule Slack message",
+      description: `Cancel scheduled message ${scheduledMessageId} in channel ${channelId} and schedule a replacement for ${postAt}. The original cannot be restored.`,
+      target: `channel ${channelId}`,
+    }),
+  },
+  {
     toolName: "slack_scheduled_cancel",
     check: ({ channelId, scheduledMessageId }) => ({
       title: "Cancel scheduled Slack message",

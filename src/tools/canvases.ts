@@ -969,7 +969,30 @@ export const canvasTools = (tool: ToolFactory) => [
 ];
 
 /** `replace` overwrites and `delete` removes canvas content; Slack offers no API to restore it. */
+/** "channels C1, C2" or "users U1" for an access change's prompt. */
+const describeAccessTargets = ({ channelIds, userIds }: Record<string, unknown>) => {
+  const ids = (value: unknown) => (Array.isArray(value) ? value.map(String) : []);
+  const channels = ids(channelIds);
+  return channels.length ? `channels ${channels.join(", ")}` : `users ${ids(userIds).join(", ")}`;
+};
+
 export const canvasApprovals: ApprovalRule[] = [
+  {
+    toolName: "slack_canvas_access_delete",
+    check: (params) => ({
+      title: "Revoke Slack canvas access",
+      description: `Revoke access to canvas ${params.canvasId} for ${describeAccessTargets(params)}.`,
+      target: `canvas ${params.canvasId}`,
+    }),
+  },
+  {
+    toolName: "slack_canvas_status_update",
+    check: ({ channelId, heading }) => ({
+      title: "Update Slack channel canvas status section",
+      description: `Write the "${heading}" section of channel ${channelId}'s canvas. An existing section with that heading is overwritten and its previous content cannot be restored.`,
+      target: `channel ${channelId}`,
+    }),
+  },
   {
     toolName: "slack_canvas_delete",
     check: ({ canvasId }) => ({

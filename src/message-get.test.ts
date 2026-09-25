@@ -4,7 +4,7 @@ import { getToolPluginMetadata } from "openclaw/plugin-sdk/tool-plugin";
 import entry from "./index.js";
 import { runTool, withMockFetch, type RecordedCall } from "./test-utils.js";
 
-const card = (ts: string, payload: Record<string, unknown>, eventType = "openclaw_card_v1") => ({
+const card = (ts: string, payload: Record<string, unknown>, eventType = "openclaw_card") => ({
   type: "message",
   ts,
   user: "U0BOT",
@@ -34,7 +34,7 @@ describe("slack_message_get", () => {
     await withMockFetch(history(), async (calls) => {
       const result = await runTool("slack_message_get", {
         channelId: "C0TEAM",
-        eventType: "openclaw_card_v1",
+        eventType: "openclaw_card",
       });
       expect(calls).toHaveLength(1);
       expect(calls[0].method).toBe("conversations.history");
@@ -45,14 +45,14 @@ describe("slack_message_get", () => {
             channelId: "C0TEAM",
             ts: "1726000240.000400",
             text: "card 1726000240.000400",
-            eventType: "openclaw_card_v1",
+            eventType: "openclaw_card",
             eventPayload: { taskId: "T-2", revision: 1 },
           },
           {
             channelId: "C0TEAM",
             ts: "1726000180.000300",
             text: "card 1726000180.000300",
-            eventType: "openclaw_card_v1",
+            eventType: "openclaw_card",
             eventPayload: { taskId: "T-1", revision: 3, nested: { phase: "build" } },
           },
           {
@@ -60,7 +60,7 @@ describe("slack_message_get", () => {
             ts: "1726000060.000100",
             threadTs: "1726000000.000001",
             text: "card 1726000060.000100",
-            eventType: "openclaw_card_v1",
+            eventType: "openclaw_card",
             eventPayload: { taskId: "T-3" },
           },
         ],
@@ -74,21 +74,21 @@ describe("slack_message_get", () => {
     await withMockFetch(history(), async () => {
       const byTask = (await runTool("slack_message_get", {
         channelId: "C0TEAM",
-        eventType: "openclaw_card_v1",
+        eventType: "openclaw_card",
         matchPayload: { taskId: "T-1" },
       })) as { messages: { ts: string }[] };
       expect(byTask.messages.map((message) => message.ts)).toEqual(["1726000180.000300"]);
 
       const nested = (await runTool("slack_message_get", {
         channelId: "C0TEAM",
-        eventType: "openclaw_card_v1",
+        eventType: "openclaw_card",
         matchPayload: { nested: { phase: "build" } },
       })) as { messages: { ts: string }[] };
       expect(nested.messages.map((message) => message.ts)).toEqual(["1726000180.000300"]);
 
       const none = (await runTool("slack_message_get", {
         channelId: "C0TEAM",
-        eventType: "openclaw_card_v1",
+        eventType: "openclaw_card",
         matchPayload: { taskId: "T-1", revision: 2 },
       })) as { messages: unknown[] };
       expect(none.messages).toEqual([]);
@@ -99,7 +99,7 @@ describe("slack_message_get", () => {
     await withMockFetch(history(), async (calls) => {
       await runTool("slack_message_get", {
         channelId: "C0TEAM",
-        eventType: "openclaw_card_v1",
+        eventType: "openclaw_card",
         threadTs: "1726000000.000001",
       });
       expect(calls[0].method).toBe("conversations.replies");
@@ -115,7 +115,7 @@ describe("slack_message_get", () => {
     await withMockFetch(history(), async (calls) => {
       await runTool("slack_message_get", {
         channelId: "C0TEAM",
-        eventType: "openclaw_card_v1",
+        eventType: "openclaw_card",
         oldest: "1726000000.000000",
         latest: "1726000500.000000",
       });
@@ -137,7 +137,7 @@ describe("slack_message_get", () => {
       async (calls) => {
         const result = await runTool("slack_message_get", {
           channelId: "C0TEAM",
-          eventType: "openclaw_card_v1",
+          eventType: "openclaw_card",
           limit: 1,
         });
         expect(calls).toHaveLength(1);
@@ -162,7 +162,7 @@ describe("slack_message_get", () => {
       async (calls) => {
         const result = await runTool("slack_message_get", {
           channelId: "C0TEAM",
-          eventType: "openclaw_card_v1",
+          eventType: "openclaw_card",
           maxPages: 3,
         });
         expect(calls).toHaveLength(3);
@@ -173,14 +173,14 @@ describe("slack_message_get", () => {
 
   it("ignores messages whose metadata is malformed", async () => {
     const messages = [
-      { type: "message", ts: "1.1", metadata: { event_type: "openclaw_card_v1" } },
+      { type: "message", ts: "1.1", metadata: { event_type: "openclaw_card" } },
       { type: "message", ts: "1.2", metadata: "nope" },
-      { type: "message", ts: "1.3", metadata: { event_type: "openclaw_card_v1", event_payload: [1] } },
+      { type: "message", ts: "1.3", metadata: { event_type: "openclaw_card", event_payload: [1] } },
     ];
     await withMockFetch(history(messages), async () => {
       const result = (await runTool("slack_message_get", {
         channelId: "C0TEAM",
-        eventType: "openclaw_card_v1",
+        eventType: "openclaw_card",
       })) as { messages: { ts: string }[] };
       expect(result.messages).toEqual([]);
     });

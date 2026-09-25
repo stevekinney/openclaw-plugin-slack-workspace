@@ -143,6 +143,20 @@ describe("channel lifecycle tools on private channels", () => {
     },
   );
 
+  it("explains a channel_not_found as a bad ID or an unseen private channel", async () => {
+    await withMockFetch(
+      () => ({ ok: false, error: "channel_not_found" }),
+      async (calls) => {
+        await expect(
+          runTool("slack_channel_archive", { channelId: "C0GONE", confirm: true }),
+        ).rejects.toThrow(
+          "Slack conversations.info failed: channel_not_found. Check the channel ID; if C0GONE is a private channel",
+        );
+        expect(methods(calls)).toEqual(["conversations.info"]);
+      },
+    );
+  });
+
   it("treats a groups:read missing_scope from conversations.info as private", async () => {
     await withMockFetch(
       () => ({ ok: false, error: "missing_scope", needed: "groups:read" }),
