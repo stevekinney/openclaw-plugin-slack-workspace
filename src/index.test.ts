@@ -430,8 +430,8 @@ describe("message metadata on posts", () => {
   const chart = { ...target, title: "C", chartType: "pie", segments: [{ label: "a", value: 1 }] };
   const blocks = { ...target, text: "t", blocks: [{ type: "divider" }] };
   const update = { ...blocks, ts: "1700000000.000100" };
-  const metadata = { eventType: "openclaw_card_v1", eventPayload: { taskId: "T-1", revision: 2 } };
-  const wire = { event_type: "openclaw_card_v1", event_payload: { taskId: "T-1", revision: 2 } };
+  const metadata = { eventType: "openclaw_card", eventPayload: { taskId: "T-1", revision: 2 } };
+  const wire = { event_type: "openclaw_card", event_payload: { taskId: "T-1", revision: 2 } };
 
   const cases: [string, Record<string, unknown>, string][] = [
     ["slack_post_table", table, "chat.postMessage"],
@@ -746,6 +746,22 @@ describe("Slack HTTP client hardening", () => {
       async (calls) => {
         const pending = runTool("slack_bookmark_list", target);
         await vi.advanceTimersByTimeAsync(1999);
+        expect(calls).toHaveLength(1);
+        await vi.advanceTimersByTimeAsync(1);
+        await expect(pending).resolves.toEqual({ bookmarks: [] });
+        expect(calls).toHaveLength(2);
+      },
+    );
+  });
+
+  it("waits at least a second when Slack sends no Retry-After", async () => {
+    vi.useFakeTimers();
+    let attempt = 0;
+    await withMockFetch(
+      () => (attempt++ === 0 ? rateLimited() : { ok: true, bookmarks: [] }),
+      async (calls) => {
+        const pending = runTool("slack_bookmark_list", target);
+        await vi.advanceTimersByTimeAsync(999);
         expect(calls).toHaveLength(1);
         await vi.advanceTimersByTimeAsync(1);
         await expect(pending).resolves.toEqual({ bookmarks: [] });

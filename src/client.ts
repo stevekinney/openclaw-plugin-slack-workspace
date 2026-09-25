@@ -115,8 +115,9 @@ const ERROR_HINTS: Record<string, string> = {
 };
 
 function retryAfterSeconds(response: Response): number {
+  // A missing header is Number(null) === 0; never retry with no backoff at all.
   const seconds = Number(response.headers.get("retry-after"));
-  return Number.isFinite(seconds) && seconds >= 0 ? seconds : 1;
+  return Number.isFinite(seconds) && seconds >= 1 ? seconds : 1;
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {

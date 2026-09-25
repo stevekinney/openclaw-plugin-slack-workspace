@@ -125,8 +125,9 @@ export const replyBroadcastParam = Type.Optional(
 
 /**
  * Machine-readable data stamped on a message (`chat.postMessage`/`chat.update` `metadata`).
- * Slack silently drops metadata whose `event_type` isn't registered under the app
- * manifest's `metadata.event_subscriptions` — the call still returns `ok: true`.
+ * `openclaw_card` is this plugin's event type. Verified live on 2026-09-25: metadata with
+ * that type round-trips through `conversations.history` with no manifest registration
+ * (the app manifest API rejects a top-level `metadata` key despite Slack's docs).
  */
 export const metadataParam = Type.Optional(
   Type.Object(
@@ -135,7 +136,7 @@ export const metadataParam = Type.Optional(
         pattern: "^[A-Za-z0-9_]+$",
         maxLength: 255,
         description:
-          "Event type name, e.g. \"openclaw_card_v1\". Must be registered in the Slack app manifest's metadata.event_subscriptions, or Slack silently discards the metadata.",
+          "Event type name. Use \"openclaw_card\" (this plugin's event type) unless a workflow needs its own; put versions in the payload, not the name.",
       }),
       eventPayload: Type.Record(Type.String(), Type.Unknown(), {
         description: "JSON object to attach, e.g. {\"taskId\":\"T-1\",\"revision\":2}.",

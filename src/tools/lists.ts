@@ -940,6 +940,19 @@ export const listTools = (tool: ToolFactory) => [
 
 export const listApprovals: ApprovalRule[] = [
   {
+    toolName: "slack_list_access_delete",
+    check: ({ listId, channelIds, userIds }) => {
+      const ids = (value: unknown) => (Array.isArray(value) ? value.map(String) : []);
+      const channels = ids(channelIds);
+      const who = channels.length ? `channels ${channels.join(", ")}` : `users ${ids(userIds).join(", ")}`;
+      return {
+        title: "Revoke Slack list access",
+        description: `Revoke access to list ${listId} for ${who}.`,
+        target: `list ${listId}`,
+      };
+    },
+  },
+  {
     toolName: "slack_list_item_delete",
     check: ({ listId, itemId }) => ({
       title: "Delete Slack list item",

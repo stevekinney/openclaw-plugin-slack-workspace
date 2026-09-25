@@ -39,6 +39,11 @@ async function requirePublicChannel(
     channel = (data.channel ?? {}) as Record<string, unknown>;
   } catch (error) {
     if (isPrivateScopeError(error)) throw privateChannelError(`Channel ${channelId}`, scope);
+    if (error instanceof Error && /channel_not_found/.test(error.message)) {
+      throw new Error(
+        `${error.message}. Check the channel ID; if ${channelId} is a private channel, the bot can't see it, and managing private channels needs the \`${scope}\` scope, which this Slack app is not granted.`,
+      );
+    }
     throw error;
   }
   if (channel.is_private === true) throw privateChannelError(`Channel ${channelId}`, scope);
