@@ -107,6 +107,7 @@ describe("approval registry", () => {
       pluginId: "slack-workspace",
       severity: "warning",
       allowedDecisions: ["allow-once", "deny"],
+      timeoutMs: 600_000,
       scope: { kind: "external-post", visibility: "restricted" },
     });
     expect(approval?.title).toEqual(expect.any(String));
