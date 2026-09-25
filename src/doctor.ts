@@ -1,4 +1,5 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
+import { resolveConfiguredSecretInputString } from "openclaw/plugin-sdk/secret-input-runtime";
 import { authTest, resolveToken, type PluginConfig, type SlackCallContext } from "./client.js";
 
 type TokenKind = "bot" | "user";
@@ -208,10 +209,45 @@ export function formatDoctorReport(report: DoctorReport): string {
  * `openclaw slack-workspace doctor [--json]`. Exits non-zero when any token is missing
  * a scope, is unavailable, or is rejected, so it can gate scripts.
  */
+/** Resolves host SecretRefs the same way the gateway would. Injectable for tests. */
+export type SecretResolver = (params: {
+  config: unknown;
+  env: NodeJS.ProcessEnv;
+  value: unknown;
+  path: string;
+}) => Promise<{ value?: string }>;
+
+/**
+ * A CLI process gets the plugin config as authored, with SecretRefs still unresolved
+ * (only the gateway resolves them into the runtime config). Resolve the two tokens
+ * here so the doctor audits the real tokens. A ref that can't be resolved is left as
+ * is, so `resolveToken` reports it as unavailable.
+ */
+export async function resolveCliTokens(
+  pluginConfig: PluginConfig,
+  hostConfig: unknown,
+  resolve: SecretResolver = resolveConfiguredSecretInputString as SecretResolver,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<PluginConfig> {
+  const resolved: PluginConfig = { ...pluginConfig };
+  for (const field of ["botToken", "userToken"] as const) {
+    const value = pluginConfig[field];
+    if (!value || typeof value === "string") continue;
+    const result = await resolve({
+      config: hostConfig,
+      env,
+      value,
+      path: `plugins.entries.slack-workspace.config.${field}`,
+    });
+    if (result.value) resolved[field] = result.value;
+  }
+  return resolved;
+}
+
 export function registerDoctorCli(api: OpenClawPluginApi): void {
-  const config = (api.pluginConfig ?? {}) as PluginConfig;
+  const pluginConfig = (api.pluginConfig ?? {}) as PluginConfig;
   api.registerCli(
-    ({ program, logger }) => {
+    ({ program, logger, config: hostConfig }) => {
       program
         .command("slack-workspace")
         .description("Slack Workspace plugin utilities")
@@ -219,6 +255,7 @@ export function registerDoctorCli(api: OpenClawPluginApi): void {
         .description("Compare the bot and user tokens' granted scopes against what each tool needs")
         .option("--json", "Print the report as JSON")
         .action(async (options: { json?: boolean }) => {
+          const config = await resolveCliTokens(pluginConfig, hostConfig);
           const report = await auditScopes(config, { api: { logger } });
           process.stdout.write(
             options.json ? `${JSON.stringify(report, null, 2)}\n` : formatDoctorReport(report),
