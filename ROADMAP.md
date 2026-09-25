@@ -948,7 +948,7 @@ that's a live, browser-driven verification, not code or a doc — see H-03 and
   - Tests: n/a (manual verification).
   - Size: S
 
-- [~] **O-07: [MANUAL] Configure approvals.plugin routing for Slack** — `~/.openclaw/openclaw.json` configures `channels.slack.execApprovals` for host *exec* approvals, but there is no `approvals.plugin` block or `channels.slack.allowFrom` for *plugin* approvals — a separately-configured surface. Once O-02 ships, plugin approval prompts have no route configured and will report "no connected approval surface can resolve it."
+- [x] **O-07: [MANUAL] Configure approvals.plugin routing for Slack** — **Done 2026-09-25:** `channels.slack.allowFrom` names the owner as plugin approver and `approvals.plugin` routes to the owner's Slack DM. Verified live: a gated call produced a pending `plugin:` approval whose card was approved from Slack by the owner. Approval prompts now stay open for 10 minutes (PR #72) after the 2-minute default expired unnoticed. Original task: `~/.openclaw/openclaw.json` configures `channels.slack.execApprovals` for host *exec* approvals, but there is no `approvals.plugin` block or `channels.slack.allowFrom` for *plugin* approvals — a separately-configured surface. Once O-02 ships, plugin approval prompts have no route configured and will report "no connected approval surface can resolve it."
   - Why: without this, O-02's permission requests silently fail to render anywhere.
   - Scope(s) & token type: n/a (host config).
   - API methods: n/a.
