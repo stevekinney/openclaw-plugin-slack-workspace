@@ -958,7 +958,7 @@ that's a live, browser-driven verification, not code or a doc — see H-03 and
   - Tests: n/a (manual verification).
   - Size: S
 
-- [~] **O-08: [MANUAL] Point existing Slack-delivering automations at the plugin's structured tools** — `openclaw automations list` shows recurring cron jobs delivering to Slack via plain-text `announce` today. Rewrite at least one recurring digest job's prompt to call `slack_post_table`/`slack_canvas_edit(append)` and reuse `updateTs` so N future messages become one edited card.
+- [x] **O-08: [MANUAL] Point existing Slack-delivering automations at the plugin's structured tools** — **Done 2026-09-25:** the daily `openclaw-reddit-recipes` job keeps its `message` summary (table cells are raw text, so links would stop being clickable) and gains a step that appends each day's new recipes to a running index on the #openclaw-recipes channel canvas via `slack_canvas_channel_get_or_create` + `slack_canvas_edit(append)`; both tools were added to its allow list. The Mac Studio memory watch is a command job, not an agent prompt, so it was left as is. Original task: `openclaw automations list` shows recurring cron jobs delivering to Slack via plain-text `announce` today. Rewrite at least one recurring digest job's prompt to call `slack_post_table`/`slack_canvas_edit(append)` and reuse `updateTs` so N future messages become one edited card.
   - Why: puts already-shipped plugin capability to work with zero plugin-code changes — only automation prompt/config edits via `openclaw automations update`. See **D-03**, which writes this pattern up so it's discoverable beyond the one automation this task touches by hand.
   - Scope(s) & token type: n/a (automation config).
   - API methods: n/a (automation prompt change; the automation itself calls this plugin's existing tools at runtime).
@@ -968,7 +968,7 @@ that's a live, browser-driven verification, not code or a doc — see H-03 and
   - Tests: n/a (operational change, verified by observing the next run).
   - Size: S
 
-- [~] **O-09: [MANUAL] Review ambient-room-event configuration for the two open Slack channels** — `~/.openclaw/openclaw.json` sets `requireMention: false` for two channels under `groupPolicy: "open"` with no `messages.groupChat.unmentionedInbound: "room_event"` override, meaning the agent replies to every unmentioned message in those channels rather than treating them as ambient context. Confirm this is intentional, or set `unmentionedInbound: "room_event"` + `visibleReplies: "message_tool"`, and confirm the `main` agent's effective tool profile includes the `message` tool (it ships in the `messaging` profile, not `minimal`/`coding`).
+- [x] **O-09: [MANUAL] Review ambient-room-event configuration for the two open Slack channels** — **Done 2026-09-25: confirmed intentional, no change.** #ai-development and #openclaw-recipes each have two members (the owner and the bot) and are working rooms where every message is meant for the agent, so replying to everything is correct; `room_event` mode would only let it stay silent. Auto-joined channels keep mention gating. Separately, `channels.slack.joinIntro` is now `false`. Original task: `~/.openclaw/openclaw.json` sets `requireMention: false` for two channels under `groupPolicy: "open"` with no `messages.groupChat.unmentionedInbound: "room_event"` override, meaning the agent replies to every unmentioned message in those channels rather than treating them as ambient context. Confirm this is intentional, or set `unmentionedInbound: "room_event"` + `visibleReplies: "message_tool"`, and confirm the `main` agent's effective tool profile includes the `message` tool (it ships in the `messaging` profile, not `minimal`/`coding`).
   - Why: this is either a deliberate choice or an unnoticed default that makes the agent noisier in those two channels than intended.
   - Scope(s) & token type: n/a (host config).
   - API methods: n/a.
@@ -1209,6 +1209,12 @@ Recorded 2026-09-23 by the owner:
 - **Scope trimming is deferred.** **O-11** is on hold and **Scope hygiene**
   is advisory. The owner is inclined to keep several broad scopes for the
   features they unlock; gate them through O-02 rather than remove them.
+- **2026-09-25 follow-ups.** O-10 dropped as unnecessary (unregistered
+  `openclaw_card` metadata round-trips live); the plugin standardizes on
+  `event_type: "openclaw_card"`. `channels.slack.joinIntro: false` so
+  auto-joins stay quiet. Live checks passed for C-09, W-01, S-03, M-01/M-02,
+  and the D-03 digest pattern (card found by metadata, updated via
+  `updateTs`).
 - **Scope-driven extras: channel management and self-joining only.** The
   owner wants channel management (S-01, S-02) and the agent joining public
   channels on its own (S-07, which needs O-12 to add `channels:join`). These
