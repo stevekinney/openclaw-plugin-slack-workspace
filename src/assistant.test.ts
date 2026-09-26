@@ -8,7 +8,7 @@ const tool = () =>
   getToolPluginMetadata(entry)?.tools.find((candidate) => candidate.name === "slack_assistant_set_title");
 
 describe("slack_assistant_set_title", () => {
-  it("calls assistant.threads.setTitle with the channel, thread, and title", async () => {
+  it("calls agents.sessions.rename with the channel, thread, and title", async () => {
     await withMockFetch(() => ({ ok: true }), async (calls) => {
       const result = await runTool("slack_assistant_set_title", {
         channelId: "D0ALICE",
@@ -16,7 +16,7 @@ describe("slack_assistant_set_title", () => {
         title: "Q3 revenue questions",
       });
       expect(calls).toHaveLength(1);
-      expect(calls[0].method).toBe("assistant.threads.setTitle");
+      expect(calls[0].method).toBe("agents.sessions.rename");
       expect(calls[0].headers.authorization).toBe("Bearer xoxb-test");
       expect(calls[0].body).toEqual({
         channel_id: "D0ALICE",
@@ -27,8 +27,64 @@ describe("slack_assistant_set_title", () => {
         channelId: "D0ALICE",
         threadTs: "1726000000.000100",
         title: "Q3 revenue questions",
+        api: "agents.sessions",
       });
     });
+  });
+
+  it.each(["unknown_method", "missing_scope"])(
+    "falls back to assistant.threads.setTitle when agents.sessions.rename fails with %s",
+    async (code) => {
+      await withMockFetch(
+        (call) => (call.method === "agents.sessions.rename" ? { ok: false, error: code } : { ok: true }),
+        async (calls) => {
+          const result = await runTool("slack_assistant_set_title", {
+            channelId: "D0ALICE",
+            threadTs: "1726000000.000100",
+            title: "Q3 revenue questions",
+          });
+          expect(calls.map((call) => call.method)).toEqual([
+            "agents.sessions.rename",
+            "assistant.threads.setTitle",
+          ]);
+          expect(calls[1].headers.authorization).toBe("Bearer xoxb-test");
+          expect(calls[1].body).toEqual({
+            channel_id: "D0ALICE",
+            thread_ts: "1726000000.000100",
+            title: "Q3 revenue questions",
+          });
+          expect(result).toEqual({
+            channelId: "D0ALICE",
+            threadTs: "1726000000.000100",
+            title: "Q3 revenue questions",
+            api: "assistant.threads",
+          });
+        },
+      );
+    },
+  );
+
+  it("does not fall back on other agents.sessions.rename errors", async () => {
+    await withMockFetch(() => ({ ok: false, error: "session_not_found" }), async (calls) => {
+      await expect(
+        runTool("slack_assistant_set_title", { channelId: "D0ALICE", threadTs: "1.2", title: "x" }),
+      ).rejects.toThrow("session_not_found");
+      expect(calls.map((call) => call.method)).toEqual(["agents.sessions.rename"]);
+    });
+  });
+
+  it("reports both errors when the legacy fallback fails too", async () => {
+    await withMockFetch(
+      (call) =>
+        call.method === "agents.sessions.rename"
+          ? { ok: false, error: "unknown_method" }
+          : { ok: false, error: "not_agent_app" },
+      async () => {
+        await expect(
+          runTool("slack_assistant_set_title", { channelId: "D0ALICE", threadTs: "1.2", title: "x" }),
+        ).rejects.toThrow(/unknown_method.*not_agent_app/);
+      },
+    );
   });
 
   it("surfaces Slack errors", async () => {
@@ -56,6 +112,9 @@ describe("slack_assistant_set_title", () => {
     expect(Value.Check(parameters, { channelId: "D0ALICE", title: "Topic" })).toBe(false);
     expect(Value.Check(parameters, { channelId: "D0ALICE", threadTs: "1.2" })).toBe(false);
     expect(Value.Check(parameters, { channelId: "D0ALICE", threadTs: "1.2", title: "" })).toBe(false);
+    expect(
+      Value.Check(parameters, { channelId: "D0ALICE", threadTs: "1.2", title: "x".repeat(201) }),
+    ).toBe(false);
   });
 
   it("documents that it only works in Agent View/Assistant View threads", () => {
@@ -131,5 +190,9 @@ describe("slack_assistant_suggest_prompts", () => {
   it("documents that it only works in Agent View/Assistant View threads", () => {
     expect(suggestTool()!.description).toMatch(/Agent View/);
     expect(suggestTool()!.description).toMatch(/Assistant View/);
+  });
+
+  it("documents that prompts appear at the top of the Messages tab", () => {
+    expect(suggestTool()!.description).toMatch(/top of the Messages tab/);
   });
 });

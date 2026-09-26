@@ -1296,6 +1296,10 @@ Recorded so a future pass through this backlog doesn't re-propose them:
 - **`assistant.threads.setStatus` (typing/thinking indicator).** Already
   owned by the bundled Slack channel plugin, which drives session status
   (processing/suspended/active).
+- **`agents.sessions.setStatus`.** The Agent Sessions successor to
+  `assistant.threads.setStatus` belongs to the channel plugin for the same
+  reason: it drives session status. M-11 only migrates the title
+  (`agents.sessions.rename`).
 - **App Home / `views.publish`.** Already owned by the channel plugin, which
   publishes a default Home view on every `app_home_opened`. A plugin-local
   `views.publish` call would race it.

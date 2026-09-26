@@ -109,8 +109,8 @@ Tools marked † take an optional `channelId`. Inside a Slack conversation, leav
 
 | Tool | What it does | Token | Scopes |
 |---|---|---|---|
-| `slack_assistant_set_title` | Rename an Agent View or Assistant View thread | bot | `assistant:write` |
-| `slack_assistant_suggest_prompts` | Show up to four suggested prompts under an assistant thread | bot | `assistant:write` |
+| `slack_assistant_set_title` | Rename an Agent View or Assistant View thread (`agents.sessions.rename`, falling back to `assistant.threads.setTitle`) | bot | `chat:write` (`assistant:write` for the fallback) |
+| `slack_assistant_suggest_prompts` | Show up to four suggested prompts, at the top of the Messages tab in Agent View | bot | `assistant:write` |
 | `slack_usergroup_list` | List user groups (read-only) | bot | `usergroups:read` |
 | `slack_usergroup_members` | List a user group's members (read-only) | bot | `usergroups:read` |
 | `slack_workflow_trigger_run` | Start a Workflow Builder workflow through a configured webhook trigger | none | none |
@@ -239,9 +239,11 @@ Slack has no method to edit a scheduled message, so `slack_schedule_reschedule` 
 
 ## Assistant thread titles
 
-`slack_assistant_set_title` wraps `assistant.threads.setTitle` to rename the title Slack shows for an Agent View or Assistant View thread, so the agent can swap the default title for something descriptive once it knows what the conversation is about. It takes `channelId`, `threadTs` (the assistant thread's root), and `title`, and it uses the bot token with the `assistant:write` scope. It only works on those Slack-managed assistant threads, not ordinary channel or DM threads. The bundled Slack channel plugin never calls `setTitle` itself, so this tool doesn't compete with core. The result is `{ channelId, threadTs, title }`.
+`slack_assistant_set_title` renames the title Slack shows for an Agent View or Assistant View thread, so the agent can swap the default title for something descriptive once it knows what the conversation is about. It takes `channelId`, `threadTs` (the assistant thread's root), and `title` (up to 200 characters), and it uses the bot token. It only works on those Slack-managed assistant threads, not ordinary channel or DM threads. The bundled Slack channel plugin never renames sessions itself, so this tool doesn't compete with core.
 
-`slack_assistant_suggest_prompts` wraps `assistant.threads.setSuggestedPrompts` to show up to four tappable follow-up prompts under an Agent View or Assistant View thread. It takes `channelId`, `threadTs`, and `prompts`, an array of one to four `{ title, message }` objects, and it uses the bot token with the `assistant:write` scope. Each call replaces the prompts already shown. The result is `{ channelId, threadTs, prompts }`. This tool is a stopgap: the bundled channel plugin only makes a threadless `setSuggestedPrompts` call to detect Agent View and has no per-thread action yet ([openclaw/openclaw#50481](https://github.com/openclaw/openclaw/issues/50481)). Retire it, or merge it into core, once core ships the equivalent.
+Slack deprecates `assistant_view` in February 2027 (see [Migrating to agent messaging](https://docs.slack.dev/ai/migrating-to-agent-messaging)), so the tool calls the Agent Sessions API first: `agents.sessions.rename`, which needs `chat:write`. When that call fails with `unknown_method` or `missing_scope`, it calls the legacy `assistant.threads.setTitle` (`assistant:write`) instead. Other errors, such as `session_not_found`, are returned as-is. The result is `{ channelId, threadTs, title, api }`, where `api` is `"agents.sessions"` or `"assistant.threads"` for the fallback.
+
+`slack_assistant_suggest_prompts` wraps `assistant.threads.setSuggestedPrompts` to show up to four tappable follow-up prompts for an Agent View or Assistant View conversation. In Agent View, Slack now shows them at the top of the Messages tab rather than under a particular thread. It takes `channelId`, `threadTs`, and `prompts`, an array of one to four `{ title, message }` objects, and it uses the bot token with the `assistant:write` scope. Each call replaces the prompts already shown. The result is `{ channelId, threadTs, prompts }`. This tool is a stopgap: the bundled channel plugin only makes a threadless `setSuggestedPrompts` call to detect Agent View and has no per-thread action yet ([openclaw/openclaw#50481](https://github.com/openclaw/openclaw/issues/50481)). Retire it, or merge it into core, once core ships the equivalent.
 
 ## Workflow triggers
 
@@ -268,7 +270,7 @@ To turn a recurring automation's N messages into one card that gets edited each 
 These gaps are deliberate decisions, not oversights. Read the matching entry under "Explicitly out of scope" in `ROADMAP.md` before proposing any of them again.
 
 - **Legacy message `attachments`.** Slack deprecated them in favor of Block Kit for new development. No tool takes an `attachments` parameter, and none should.
-- **Anything the bundled Slack channel plugin already owns.** That covers pins, reactions, the emoji list, member info, in-turn file upload and download, opening a conversation for ordinary chat, assistant thread status (`assistant.threads.setStatus`), and App Home (`views.publish`). A second `views.publish` would race the channel plugin's own Home view.
+- **Anything the bundled Slack channel plugin already owns.** That covers pins, reactions, the emoji list, member info, in-turn file upload and download, opening a conversation for ordinary chat, assistant thread and agent session status (`assistant.threads.setStatus`, `agents.sessions.setStatus`), and App Home (`views.publish`). A second `views.publish` would race the channel plugin's own Home view.
 - **Per-message personas (`chat:write.customize`) and dedicated `chat:write.public` or `users:write` features.** The owner dropped them.
 - **Link unfurling and Work Objects (`chat.unfurl`).** They need a `link_shared` event that this app doesn't subscribe to, relayed from the channel plugin's Socket Mode connection, plus a registered unfurl domain. None of those exist.
 - **Workflow Steps.** Slack retired legacy steps from apps (`workflow.steps:execute`) in September 2024. Modern custom steps (`functions.completeSuccess`) need Socket Mode handlers, and the channel plugin owns this app's only connection.
