@@ -8,11 +8,8 @@ import { runTool, withMockFetch, type RecordedCall } from "./test-utils.js";
 const PUBLIC = { id: "C0TEST", name: "general", is_private: false };
 const PRIVATE = { id: "C0PRIV", name: "secret", is_private: true };
 
-/** Answer `conversations.info` with `info`, and every other method with `result`. */
-const slack =
-  (info: Record<string, unknown>, result: Record<string, unknown> = { ok: true }) =>
-  ({ method }: RecordedCall) =>
-    method === "conversations.info" ? { ok: true, channel: info } : result;
+/** Slack's answer when a private-channel call lacks the `groups:*` twin scope. */
+const missingScope = (needed: string) => ({ ok: false, error: "missing_scope", needed });
 
 const methods = (calls: RecordedCall[]) => calls.map((call) => call.method);
 
@@ -83,120 +80,122 @@ const existingChannelCases: Case[] = [
   },
 ];
 
-describe("channel lifecycle tools on public channels", () => {
-  it("slack_channel_create creates a public channel", async () => {
+const onChannel = (id: string, { params, body, result, expected }: Case) => {
+  const swap = (value: unknown): any =>
+    JSON.parse(JSON.stringify(value ?? null).replaceAll('"C0TEST"', `"${id}"`).replaceAll('"general"', '"secret"'));
+  return { params: swap(params), body: swap(body), result: swap(result), expected: swap(expected) };
+};
+
+describe("channel lifecycle tools", () => {
+  it.each([false, true])("slack_channel_create creates a channel (isPrivate: %s)", async (isPrivate) => {
+    const channel = isPrivate ? PRIVATE : { ...PUBLIC, id: "C0NEW", name: "launch" };
     await withMockFetch(
-      () => ({ ok: true, channel: { id: "C0NEW", name: "launch", is_private: false } }),
+      () => ({ ok: true, channel }),
       async (calls) => {
-        await expect(runTool("slack_channel_create", { name: "launch" })).resolves.toEqual({
-          channel: { id: "C0NEW", name: "launch" },
-        });
+        await expect(
+          runTool("slack_channel_create", { name: channel.name, isPrivate }),
+        ).resolves.toEqual({ channel: { id: channel.id, name: channel.name } });
         expect(methods(calls)).toEqual(["conversations.create"]);
-        expect(calls[0].body).toEqual({ name: "launch", is_private: false });
+        expect(calls[0].body).toEqual({ name: channel.name, is_private: isPrivate });
         expect(calls[0].headers.authorization).toBe("Bearer xoxb-test");
       },
     );
   });
 
-  it.each(existingChannelCases)(
-    "$tool checks the channel is public, then calls $method",
-    async ({ tool, params, method, body, result, expected }) => {
-      await withMockFetch(slack(PUBLIC, result), async (calls) => {
-        await expect(runTool(tool, params)).resolves.toEqual(expected);
-        expect(methods(calls)).toEqual(["conversations.info", method]);
-        expect(calls[0].body).toEqual({ channel: "C0TEST" });
-        expect(calls[1].body).toEqual(body);
-      });
-    },
-  );
-});
-
-describe("slack_channel_unarchive", () => {
-  it("unarchives an archived public channel", async () => {
-    await withMockFetch(slack({ ...PUBLIC, is_archived: true }), async (calls) => {
-      await expect(
-        runTool("slack_channel_unarchive", { channelId: "C0TEST", confirm: true }),
-      ).resolves.toEqual({ unarchived: true, channelId: "C0TEST" });
-      expect(methods(calls)).toEqual(["conversations.info", "conversations.unarchive"]);
-      expect(calls[1].body).toEqual({ channel: "C0TEST" });
-    });
-  });
-});
-
-describe("channel lifecycle tools on private channels", () => {
-  it("slack_channel_create refuses isPrivate without calling Slack", async () => {
+  it("slack_channel_create defaults to a public channel", async () => {
     await withMockFetch(
-      () => ({ ok: true }),
+      () => ({ ok: true, channel: { id: "C0NEW", name: "launch", is_private: false } }),
       async (calls) => {
-        await expect(
-          runTool("slack_channel_create", { name: "secret", isPrivate: true }),
-        ).rejects.toThrow("needs the `groups:write` scope");
-        expect(calls).toHaveLength(0);
+        await runTool("slack_channel_create", { name: "launch" });
+        expect(calls[0].body).toEqual({ name: "launch", is_private: false });
       },
     );
   });
 
-  it.each(existingChannelCases)(
-    "$tool names $scope instead of calling $method",
-    async ({ tool, params, scope }) => {
-      await withMockFetch(slack(PRIVATE), async (calls) => {
-        const failure = runTool(tool, { ...params, channelId: "C0PRIV" });
-        await expect(failure).rejects.toThrow(
-          `Channel C0PRIV is a private channel. This plugin only manages public channels: acting on private channels needs the \`${scope}\` scope, which this Slack app is not granted.`,
-        );
-        expect(methods(calls)).toEqual(["conversations.info"]);
-      });
-    },
-  );
+  it.each(existingChannelCases)("$tool calls $method directly on a public channel", async (testCase) => {
+    const { tool, params, method, body, result, expected } = testCase;
+    await withMockFetch(
+      () => result,
+      async (calls) => {
+        await expect(runTool(tool, params)).resolves.toEqual(expected);
+        expect(methods(calls)).toEqual([method]);
+        expect(calls[0].body).toEqual(body);
+      },
+    );
+  });
 
+  it.each(existingChannelCases)("$tool acts on a private channel the bot is in", async (testCase) => {
+    const { params, body, result, expected } = onChannel("C0PRIV", testCase);
+    await withMockFetch(
+      () => result,
+      async (calls) => {
+        await expect(runTool(testCase.tool, params)).resolves.toEqual(expected);
+        expect(methods(calls)).toEqual([testCase.method]);
+        expect(calls[0].body).toEqual(body);
+      },
+    );
+  });
+});
+
+describe("private-channel fallback without groups:write*", () => {
   it.each(existingChannelCases)(
-    "$tool translates Slack's groups:* missing_scope into the explicit error",
-    async ({ tool, params, scope }) => {
+    "$tool turns Slack's missing_scope ($scope) into the explicit error",
+    async ({ tool, params, method, scope }) => {
       await withMockFetch(
-        ({ method }) =>
-          method === "conversations.info"
-            ? { ok: true, channel: PUBLIC }
-            : { ok: false, error: "missing_scope", needed: scope },
-        async () => {
-          await expect(runTool(tool, params)).rejects.toThrow(`needs the \`${scope}\` scope`);
+        () => missingScope(scope),
+        async (calls) => {
+          await expect(runTool(tool, { ...params, channelId: "C0PRIV" })).rejects.toThrow(
+            `Channel C0PRIV is a private channel, and acting on private channels needs the \`${scope}\` scope, which this Slack app's bot token lacks. Add it to the Slack app, reinstall, and run \`openclaw slack-workspace doctor\` to confirm.`,
+          );
+          expect(methods(calls)).toEqual([method]);
         },
       );
     },
   );
 
-  it("explains a channel_not_found as a bad ID or an unseen private channel", async () => {
+  it("slack_channel_create with isPrivate names groups:write", async () => {
     await withMockFetch(
-      () => ({ ok: false, error: "channel_not_found" }),
-      async (calls) => {
+      () => missingScope("groups:write"),
+      async () => {
         await expect(
-          runTool("slack_channel_archive", { channelId: "C0GONE", confirm: true }),
-        ).rejects.toThrow(
-          "Slack conversations.info failed: channel_not_found. Check the channel ID; if C0GONE is a private channel",
-        );
-        expect(methods(calls)).toEqual(["conversations.info"]);
+          runTool("slack_channel_create", { name: "secret", isPrivate: true }),
+        ).rejects.toThrow('Channel "secret" is a private channel, and acting on private channels needs the `groups:write` scope');
       },
     );
   });
 
-  it("treats a groups:read missing_scope from conversations.info as private", async () => {
+  it("passes a missing public-channel scope through unchanged", async () => {
     await withMockFetch(
-      () => ({ ok: false, error: "missing_scope", needed: "groups:read" }),
+      () => missingScope("channels:manage"),
+      async () => {
+        await expect(
+          runTool("slack_channel_archive", { channelId: "C0TEST", confirm: true }),
+        ).rejects.toThrow("Slack conversations.archive failed: missing_scope (needs scope: channels:manage)");
+      },
+    );
+  });
+
+  it("explains a channel_not_found as a bad ID or a private channel the bot isn't in", async () => {
+    await withMockFetch(
+      () => ({ ok: false, error: "channel_not_found" }),
       async (calls) => {
         await expect(
-          runTool("slack_channel_set_topic", { channelId: "C0PRIV", topic: "t" }),
-        ).rejects.toThrow("needs the `groups:write.topic` scope");
-        expect(methods(calls)).toEqual(["conversations.info"]);
+          runTool("slack_channel_set_topic", { channelId: "C0GONE", topic: "t" }),
+        ).rejects.toThrow(
+          "Slack conversations.setTopic failed: channel_not_found. Check the channel ID; if it is a private channel, the bot can only act on it as a member",
+        );
+        expect(methods(calls)).toEqual(["conversations.setTopic"]);
       },
     );
   });
 
   it("passes other Slack errors through unchanged", async () => {
     await withMockFetch(
-      () => ({ ok: false, error: "channel_not_found" }),
+      () => ({ ok: false, error: "is_archived" }),
       async () => {
         await expect(
-          runTool("slack_channel_set_topic", { channelId: "C0NONE", topic: "t" }),
-        ).rejects.toThrow("Slack conversations.info failed: channel_not_found");
+          runTool("slack_channel_set_topic", { channelId: "C0TEST", topic: "t" }),
+        ).rejects.toThrow(/^Slack conversations.setTopic failed: is_archived/);
       },
     );
   });
@@ -233,6 +232,23 @@ describe("confirm guard on archive, unarchive, and rename", () => {
             "without `confirm: true`",
           );
         }
+        expect(calls).toHaveLength(0);
+      },
+    );
+  });
+});
+
+describe("private channels keep the archive and rename guards", () => {
+  it.each([
+    ["slack_channel_archive", { channelId: "C0PRIV" }],
+    ["slack_channel_unarchive", { channelId: "C0PRIV" }],
+    ["slack_channel_rename", { channelId: "C0PRIV", name: "renamed" }],
+  ])("%s needs confirm: true and an approval", async (name, params) => {
+    expect(approvalFor(name, { ...params, confirm: true })?.scope.target).toBe("channel C0PRIV");
+    await withMockFetch(
+      () => ({ ok: true, channel: PRIVATE }),
+      async (calls) => {
+        await expect(runTool(name, params)).rejects.toThrow("without `confirm: true`");
         expect(calls).toHaveLength(0);
       },
     );
@@ -416,6 +432,71 @@ describe("slack_channel_kickoff", () => {
       );
       expect(methods(calls)).toEqual(["conversations.create"]);
     });
+  });
+
+  it("creates a private channel with isPrivate and runs every step on it", async () => {
+    const privateRoom = ({ method }: RecordedCall) =>
+      method === "conversations.create"
+        ? { ok: true, channel: PRIVATE }
+        : kickoffSlack()({ method } as RecordedCall);
+    await withMockFetch(privateRoom, async (calls) => {
+      const result = (await runTool("slack_channel_kickoff", {
+        ...full,
+        name: "secret",
+        isPrivate: true,
+      })) as Record<string, any>;
+      expect(calls[0].body).toEqual({ name: "secret", is_private: true });
+      expect(result.complete).toBe(true);
+      expect(result.channel).toEqual({ id: "C0PRIV", name: "secret" });
+      const body = (method: string) => calls.find((call) => call.method === method)!.body;
+      expect(body("conversations.setTopic")).toEqual({ channel: "C0PRIV", topic: "Ship it" });
+      expect(body("conversations.invite")).toEqual({ channel: "C0PRIV", users: "U0A,U0B" });
+    });
+  });
+
+  it("names the missing groups:* scope when creating a private channel fails", async () => {
+    await withMockFetch(
+      () => ({ ok: false, error: "missing_scope", needed: "groups:write" }),
+      async (calls) => {
+        await expect(
+          runTool("slack_channel_kickoff", { name: "secret", isPrivate: true }),
+        ).rejects.toThrow('Channel "secret" is a private channel, and acting on private channels needs the `groups:write` scope');
+        expect(methods(calls)).toEqual(["conversations.create"]);
+      },
+    );
+  });
+
+  it("reports a private-channel step's missing groups:* scope explicitly", async () => {
+    const privateRoom = ({ method }: RecordedCall) => {
+      if (method === "conversations.create") return { ok: true, channel: PRIVATE };
+      if (method === "conversations.invite") {
+        return { ok: false, error: "missing_scope", needed: "groups:write.invites" };
+      }
+      return { ok: true, channel: PRIVATE };
+    };
+    await withMockFetch(privateRoom, async () => {
+      const result = (await runTool("slack_channel_kickoff", {
+        name: "secret",
+        isPrivate: true,
+        topic: "t",
+        invite: ["U0A"],
+      })) as Record<string, any>;
+      expect(result.complete).toBe(false);
+      expect(result.steps[1]).toEqual({ step: "topic", ok: true });
+      expect(result.steps[2].step).toBe("invite");
+      expect(result.steps[2].error).toContain(
+        "Channel C0PRIV is a private channel, and acting on private channels needs the `groups:write.invites` scope",
+      );
+    });
+  });
+
+  it("says private channel in the approval when isPrivate is set", () => {
+    const approval = approvalFor("slack_channel_kickoff", { name: "secret", isPrivate: true });
+    expect(approval?.description).toMatch(/^Create private channel #secret/);
+    expect(approval?.scope.target).toBe("new private channel #secret");
+    expect(approvalFor("slack_channel_kickoff", { name: "launch" })?.description).toMatch(
+      /^Create public channel #launch/,
+    );
   });
 
   it("always asks a human first, listing what it will do", () => {

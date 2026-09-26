@@ -53,24 +53,32 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind | "none"; scopes: st
   slack_channel_list: { token: "bot", scopes: ["channels:read"] },
   // groups:read stands in for channels:read on private channels.
   slack_channel_members: { token: "bot", scopes: ["channels:read"] },
-  slack_channel_create: { token: "bot", scopes: ["channels:manage"] },
-  // Every channel tool but create reads conversations.info first to refuse private channels.
-  slack_channel_archive: { token: "bot", scopes: ["channels:read", "channels:manage"] },
-  slack_channel_unarchive: { token: "bot", scopes: ["channels:read", "channels:manage"] },
-  slack_channel_rename: { token: "bot", scopes: ["channels:read", "channels:manage"] },
-  slack_channel_set_topic: { token: "bot", scopes: ["channels:read", "channels:write.topic"] },
-  slack_channel_set_purpose: { token: "bot", scopes: ["channels:read", "channels:manage"] },
-  slack_channel_invite: { token: "bot", scopes: ["channels:read", "channels:write.invites"] },
+  // Each lifecycle tool pairs the public-channel scope with its private-channel twin
+  // (groups:write*). Without the twin, the tool still works on public channels and
+  // names the missing scope when it reaches a private one.
+  slack_channel_create: { token: "bot", scopes: ["channels:manage", "groups:write"] },
+  slack_channel_archive: { token: "bot", scopes: ["channels:manage", "groups:write"] },
+  slack_channel_unarchive: { token: "bot", scopes: ["channels:manage", "groups:write"] },
+  slack_channel_rename: { token: "bot", scopes: ["channels:manage", "groups:write"] },
+  slack_channel_set_topic: { token: "bot", scopes: ["channels:write.topic", "groups:write.topic"] },
+  slack_channel_set_purpose: { token: "bot", scopes: ["channels:manage", "groups:write"] },
+  slack_channel_invite: {
+    token: "bot",
+    scopes: ["channels:write.invites", "groups:write.invites"],
+  },
   // channels:join is not granted until O-12; any tool can also auto-join with it.
   slack_channel_join: { token: "bot", scopes: ["channels:read", "channels:join"] },
+  // Reads conversations.info first to refuse private channels.
   slack_channel_leave: { token: "bot", scopes: ["channels:read", "channels:manage"] },
-  // Creates the channel itself, so it skips the conversations.info check.
   slack_channel_kickoff: {
     token: "bot",
     scopes: [
       "channels:manage",
       "channels:write.topic",
       "channels:write.invites",
+      "groups:write",
+      "groups:write.topic",
+      "groups:write.invites",
       "canvases:write",
       "bookmarks:write",
     ],

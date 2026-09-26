@@ -4,7 +4,6 @@ import {
   joinPublicChannel,
   resolveToken,
   SlackApiError,
-  type SlackCallContext,
 } from "../client.js";
 import type { ApprovalRule } from "../approvals.js";
 import { cursorParams, toPage, walkPages, type PageRequest } from "../pagination.js";
@@ -13,55 +12,37 @@ import { addBookmark, slackBookmark } from "./bookmarks.js";
 import { createCanvas, createdCanvasSchema } from "./canvases.js";
 
 /**
- * The app holds only the public-channel scopes (`channels:manage`,
- * `channels:write.topic`, `channels:write.invites`); their private-channel twins
- * (`groups:write*`) are deliberately not granted. Every tool here names the missing
- * scope up front instead of letting Slack answer with a bare `missing_scope`.
+ * Private channels need the `groups:write*` twins of the public-channel scopes
+ * (`channels:manage`, `channels:write.topic`, `channels:write.invites`). The app holds
+ * both sets, so these tools act on any channel the bot is a member of. On an install
+ * that lacks a `groups:*` scope, Slack answers a private-channel call with a bare
+ * `missing_scope`; the tools translate it into an error naming the scope.
  */
-type PrivateScope = "groups:write" | "groups:write.topic" | "groups:write.invites";
-
-const privateChannelError = (channel: string, scope: PrivateScope) =>
+const privateChannelError = (channel: string, scope: string, options?: ErrorOptions) =>
   new Error(
-    `${channel} is a private channel. This plugin only manages public channels: acting on private channels needs the \`${scope}\` scope, which this Slack app is not granted.`,
+    `${channel} is a private channel, and acting on private channels needs the \`${scope}\` scope, which this Slack app's bot token lacks. Add it to the Slack app, reinstall, and run \`openclaw slack-workspace doctor\` to confirm.`,
+    options,
   );
 
-/** Slack's own rejection when the call reached a private channel anyway. */
-const isPrivateScopeError = (error: unknown) =>
-  error instanceof Error && /missing_scope \(needs scope: groups:/.test(error.message);
+/** The `groups:*` scope Slack names when a private-channel call lacks it. */
+const missingPrivateScope = (error: unknown) =>
+  error instanceof SlackApiError && error.code === "missing_scope"
+    ? /needs scope: (groups:[\w.]+)/.exec(error.message)?.[1]
+    : undefined;
 
-/**
- * Look the channel up with `conversations.info` and refuse private ones before the
- * mutating call. A private channel the bot can't read also surfaces as a `groups:*`
- * `missing_scope`, which gets the same explicit error.
- */
-async function requirePublicChannel(
-  channelId: string,
-  token: string,
-  scope: PrivateScope,
-  context: SlackCallContext,
-): Promise<void> {
-  let channel: Record<string, unknown>;
-  try {
-    const data = await callSlack("conversations.info", token, { channel: channelId }, context, true);
-    channel = (data.channel ?? {}) as Record<string, unknown>;
-  } catch (error) {
-    if (isPrivateScopeError(error)) throw privateChannelError(`Channel ${channelId}`, scope);
-    if (error instanceof Error && /channel_not_found/.test(error.message)) {
-      throw new Error(
-        `${error.message}. Check the channel ID; if ${channelId} is a private channel, the bot can't see it, and managing private channels needs the \`${scope}\` scope, which this Slack app is not granted.`,
-      );
-    }
-    throw error;
-  }
-  if (channel.is_private === true) throw privateChannelError(`Channel ${channelId}`, scope);
-}
-
-/** Run a mutating call, translating a `groups:*` `missing_scope` into the explicit error. */
-async function publicOnly<T>(channelId: string, scope: PrivateScope, call: () => Promise<T>) {
+/** Run a channel call, translating a `groups:*` `missing_scope` into the explicit error. */
+async function withPrivateFallback<T>(channel: string, call: () => Promise<T>): Promise<T> {
   try {
     return await call();
   } catch (error) {
-    if (isPrivateScopeError(error)) throw privateChannelError(`Channel ${channelId}`, scope);
+    const missing = missingPrivateScope(error);
+    if (missing) throw privateChannelError(channel, missing, { cause: error });
+    if (error instanceof SlackApiError && error.code === "channel_not_found") {
+      throw new Error(
+        `${error.message}. Check the channel ID; if it is a private channel, the bot can only act on it as a member: invite it with \`/invite @OpenClaw\`.`,
+        { cause: error },
+      );
+    }
     throw error;
   }
 }
@@ -86,8 +67,8 @@ const curateChannel = (raw: unknown, fallbackId = "") => {
   return { id: String(channel.id ?? fallbackId), name: String(channel.name ?? "") };
 };
 
-const publicChannelIdParam = () =>
-  channelIdParam("Public channels only; private channels are refused.");
+const memberChannelIdParam = () =>
+  channelIdParam("A public channel, or a private channel the bot is a member of.");
 
 const channelNameParam = (description: string) =>
   Type.String({ minLength: 1, maxLength: 80, description });
@@ -96,6 +77,14 @@ const confirmParam = (action: string) =>
   Type.Literal(true, {
     description: `Must be exactly true to ${action}. There is no default: omitting it rejects the call before Slack is contacted.`,
   });
+
+const isPrivateParam = () =>
+  Type.Optional(
+    Type.Boolean({
+      description:
+        "Create a private channel instead of a public one (needs `groups:write`). Default false.",
+    }),
+  );
 
 const userIdsParam = (description: string) =>
   Type.Array(Type.String({ description: "User ID, e.g. U0123ABCD." }), {
@@ -293,27 +282,19 @@ export const channelTools = (tool: ToolFactory) => [
     name: "slack_channel_create",
     label: "Create Slack channel",
     description:
-      "Create a public Slack channel. Private channels are not supported: they need the `groups:write` scope, which this app is not granted.",
+      "Create a Slack channel: public by default, or private with `isPrivate: true`. The bot is a member of the new channel either way.",
     parameters: Type.Object({
       name: channelNameParam(
         "Channel name: lowercase letters, numbers, hyphens, and underscores; at most 80 characters.",
       ),
-      isPrivate: Type.Optional(
-        Type.Boolean({
-          description: "Must be false or omitted; private channels need `groups:write`.",
-        }),
-      ),
+      isPrivate: isPrivateParam(),
     }),
     outputSchema: Type.Object({ channel: slackChannel }, { additionalProperties: false }),
-    async execute({ name, isPrivate }, config, context) {
+    async execute({ name, isPrivate = false }, config, context) {
       context.signal?.throwIfAborted();
-      if (isPrivate) throw privateChannelError(`Channel "${name}"`, "groups:write");
       const token = resolveToken(config);
-      const data = await callSlack(
-        "conversations.create",
-        token,
-        { name, is_private: false },
-        context,
+      const data = await withPrivateFallback(`Channel "${name}"`, () =>
+        callSlack("conversations.create", token, { name, is_private: isPrivate }, context),
       );
       return { channel: curateChannel(data.channel) };
     },
@@ -323,9 +304,9 @@ export const channelTools = (tool: ToolFactory) => [
     name: "slack_channel_archive",
     label: "Archive Slack channel",
     description:
-      "Archive a public Slack channel. Disruptive: members lose the channel from their sidebar. Requires `confirm: true` and a human's approval. Private channels are refused (they need `groups:write`).",
+      "Archive a Slack channel: public, or private if the bot is a member. Disruptive: members lose the channel from their sidebar. Requires `confirm: true` and a human's approval.",
     parameters: Type.Object({
-      channelId: publicChannelIdParam(),
+      channelId: memberChannelIdParam(),
       confirm: confirmParam("archive the channel"),
     }),
     outputSchema: Type.Object(
@@ -336,8 +317,7 @@ export const channelTools = (tool: ToolFactory) => [
       context.signal?.throwIfAborted();
       requireConfirm(confirm, `archive channel ${channelId}`);
       const token = resolveToken(config);
-      await requirePublicChannel(channelId, token, "groups:write", context);
-      await publicOnly(channelId, "groups:write", () =>
+      await withPrivateFallback(`Channel ${channelId}`, () =>
         callSlack("conversations.archive", token, { channel: channelId }, context),
       );
       return { archived: true, channelId };
@@ -348,9 +328,9 @@ export const channelTools = (tool: ToolFactory) => [
     name: "slack_channel_unarchive",
     label: "Unarchive Slack channel",
     description:
-      "Unarchive a public Slack channel: the recovery path for slack_channel_archive. Visible to the whole workspace: the channel returns to search and the channel browser. Requires `confirm: true` and a human's approval. Private channels are refused (they need `groups:write`).",
+      "Unarchive a Slack channel (public, or private if the bot is a member): the recovery path for slack_channel_archive. Visible to everyone who can see the channel: it returns to search and the channel browser. Requires `confirm: true` and a human's approval.",
     parameters: Type.Object({
-      channelId: publicChannelIdParam(),
+      channelId: memberChannelIdParam(),
       confirm: confirmParam("unarchive the channel"),
     }),
     outputSchema: Type.Object(
@@ -361,8 +341,7 @@ export const channelTools = (tool: ToolFactory) => [
       context.signal?.throwIfAborted();
       requireConfirm(confirm, `unarchive channel ${channelId}`);
       const token = resolveToken(config);
-      await requirePublicChannel(channelId, token, "groups:write", context);
-      await publicOnly(channelId, "groups:write", () =>
+      await withPrivateFallback(`Channel ${channelId}`, () =>
         callSlack("conversations.unarchive", token, { channel: channelId }, context),
       );
       return { unarchived: true, channelId };
@@ -373,9 +352,9 @@ export const channelTools = (tool: ToolFactory) => [
     name: "slack_channel_rename",
     label: "Rename Slack channel",
     description:
-      "Rename a public Slack channel. Disruptive: links and habits built on the old name break. Requires `confirm: true` and a human's approval. Private channels are refused (they need `groups:write`).",
+      "Rename a Slack channel: public, or private if the bot is a member. Disruptive: links and habits built on the old name break. Requires `confirm: true` and a human's approval.",
     parameters: Type.Object({
-      channelId: publicChannelIdParam(),
+      channelId: memberChannelIdParam(),
       name: channelNameParam("New channel name, following Slack's naming rules; at most 80 characters."),
       confirm: confirmParam("rename the channel"),
     }),
@@ -384,8 +363,7 @@ export const channelTools = (tool: ToolFactory) => [
       context.signal?.throwIfAborted();
       requireConfirm(confirm, `rename channel ${channelId}`);
       const token = resolveToken(config);
-      await requirePublicChannel(channelId, token, "groups:write", context);
-      const data = await publicOnly(channelId, "groups:write", () =>
+      const data = await withPrivateFallback(`Channel ${channelId}`, () =>
         callSlack("conversations.rename", token, { channel: channelId, name }, context),
       );
       return { channel: curateChannel(data.channel, channelId) };
@@ -396,9 +374,9 @@ export const channelTools = (tool: ToolFactory) => [
     name: "slack_channel_set_topic",
     label: "Set Slack channel topic",
     description:
-      "Set a public Slack channel's topic. Private channels are refused (they need `groups:write.topic`).",
+      "Set a Slack channel's topic: public, or private if the bot is a member.",
     parameters: Type.Object({
-      channelId: publicChannelIdParam(),
+      channelId: memberChannelIdParam(),
       topic: Type.String({ maxLength: 250, description: "New topic; at most 250 characters." }),
     }),
     outputSchema: Type.Object(
@@ -408,8 +386,7 @@ export const channelTools = (tool: ToolFactory) => [
     async execute({ channelId, topic }, config, context) {
       context.signal?.throwIfAborted();
       const token = resolveToken(config);
-      await requirePublicChannel(channelId, token, "groups:write.topic", context);
-      await publicOnly(channelId, "groups:write.topic", () =>
+      await withPrivateFallback(`Channel ${channelId}`, () =>
         callSlack("conversations.setTopic", token, { channel: channelId, topic }, context),
       );
       return { channelId, topic };
@@ -420,9 +397,9 @@ export const channelTools = (tool: ToolFactory) => [
     name: "slack_channel_set_purpose",
     label: "Set Slack channel purpose",
     description:
-      "Set a public Slack channel's purpose (its description). Private channels are refused (they need `groups:write`).",
+      "Set a Slack channel's purpose (its description): public, or private if the bot is a member.",
     parameters: Type.Object({
-      channelId: publicChannelIdParam(),
+      channelId: memberChannelIdParam(),
       purpose: Type.String({ maxLength: 250, description: "New purpose; at most 250 characters." }),
     }),
     outputSchema: Type.Object(
@@ -432,8 +409,7 @@ export const channelTools = (tool: ToolFactory) => [
     async execute({ channelId, purpose }, config, context) {
       context.signal?.throwIfAborted();
       const token = resolveToken(config);
-      await requirePublicChannel(channelId, token, "groups:write", context);
-      await publicOnly(channelId, "groups:write", () =>
+      await withPrivateFallback(`Channel ${channelId}`, () =>
         callSlack("conversations.setPurpose", token, { channel: channelId, purpose }, context),
       );
       return { channelId, purpose };
@@ -444,9 +420,9 @@ export const channelTools = (tool: ToolFactory) => [
     name: "slack_channel_invite",
     label: "Invite to Slack channel",
     description:
-      "Invite users to a public Slack channel. Private channels are refused (they need `groups:write.invites`).",
+      "Invite users to a Slack channel: public, or private if the bot is a member.",
     parameters: Type.Object({
-      channelId: publicChannelIdParam(),
+      channelId: memberChannelIdParam(),
       userIds: userIdsParam("Users to invite; at most 100 per call."),
     }),
     outputSchema: Type.Object(
@@ -456,8 +432,7 @@ export const channelTools = (tool: ToolFactory) => [
     async execute({ channelId, userIds }, config, context) {
       context.signal?.throwIfAborted();
       const token = resolveToken(config);
-      await requirePublicChannel(channelId, token, "groups:write.invites", context);
-      const data = await publicOnly(channelId, "groups:write.invites", () =>
+      const data = await withPrivateFallback(`Channel ${channelId}`, () =>
         callSlack(
           "conversations.invite",
           token,
@@ -494,9 +469,9 @@ export const channelTools = (tool: ToolFactory) => [
     name: "slack_channel_leave",
     label: "Leave Slack channel",
     description:
-      "Remove the bot from a public Slack channel. The agent stops answering @-mentions there. Private channels are refused (they need `groups:write`).",
+      "Remove the bot from a public Slack channel. The agent stops answering @-mentions there. Private channels are refused: once out, the bot can't rejoin one without a member's invite.",
     parameters: Type.Object({
-      channelId: publicChannelIdParam(),
+      channelId: channelIdParam("Public channels only; private channels are refused."),
     }),
     outputSchema: Type.Object(
       {
@@ -508,10 +483,15 @@ export const channelTools = (tool: ToolFactory) => [
     async execute({ channelId }, config, context) {
       context.signal?.throwIfAborted();
       const token = resolveToken(config);
-      await requirePublicChannel(channelId, token, "groups:write", context);
-      const data = await publicOnly(channelId, "groups:write", () =>
-        callSlack("conversations.leave", token, { channel: channelId }, context),
+      const info = await withPrivateFallback(`Channel ${channelId}`, () =>
+        callSlack("conversations.info", token, { channel: channelId }, context, true),
       );
+      if ((info.channel as { is_private?: unknown } | undefined)?.is_private === true) {
+        throw new Error(
+          `Channel ${channelId} is a private channel. slack_channel_leave only leaves public channels: once out of a private channel, the bot can't rejoin it without a member's invite.`,
+        );
+      }
+      const data = await callSlack("conversations.leave", token, { channel: channelId }, context);
       return { channelId, left: data.not_in_channel !== true };
     },
   }),
@@ -520,11 +500,12 @@ export const channelTools = (tool: ToolFactory) => [
     name: "slack_channel_kickoff",
     label: "Kick off Slack channel",
     description:
-      "Stand up a project room in one call: create a public channel, then optionally set its topic and purpose, invite users, create a canvas shared to it, and add a link bookmark. Treat this as requiring confirmation before use: it always waits for a human's approval. Steps after create run even if an earlier one fails; each is reported in `steps` with its error, and `complete` is false if any failed. If create itself fails, the call throws and nothing else runs.",
+      "Stand up a project room in one call: create a channel (public, or private with `isPrivate: true`), then optionally set its topic and purpose, invite users, create a canvas shared to it, and add a link bookmark. Treat this as requiring confirmation before use: it always waits for a human's approval. Steps after create run even if an earlier one fails; each is reported in `steps` with its error, and `complete` is false if any failed. If create itself fails, the call throws and nothing else runs.",
     parameters: Type.Object({
       name: channelNameParam(
         "Channel name: lowercase letters, numbers, hyphens, and underscores; at most 80 characters.",
       ),
+      isPrivate: isPrivateParam(),
       topic: Type.Optional(
         Type.String({ maxLength: 250, description: "Channel topic; at most 250 characters." }),
       ),
@@ -587,15 +568,16 @@ export const channelTools = (tool: ToolFactory) => [
       },
       { additionalProperties: false },
     ),
-    async execute({ name, topic, purpose, invite, canvas, bookmark }, config, context) {
+    async execute(
+      { name, isPrivate = false, topic, purpose, invite, canvas, bookmark },
+      config,
+      context,
+    ) {
       context.signal?.throwIfAborted();
       const token = resolveToken(config);
       // Nothing exists yet, so a failed create is an ordinary throw.
-      const created = await callSlack(
-        "conversations.create",
-        token,
-        { name, is_private: false },
-        context,
+      const created = await withPrivateFallback(`Channel "${name}"`, () =>
+        callSlack("conversations.create", token, { name, is_private: isPrivate }, context),
       );
       const channel = curateChannel(created.channel);
       const steps: KickoffStep[] = [{ step: "create", ok: true }];
@@ -604,7 +586,7 @@ export const channelTools = (tool: ToolFactory) => [
       const run = async (step: KickoffStepName, action: () => Promise<string | void>) => {
         context.signal?.throwIfAborted();
         try {
-          const error = await action();
+          const error = await withPrivateFallback(`Channel ${channel.id}`, action);
           steps.push(error === undefined ? { step, ok: true } : { step, ok: false, error });
           return error === undefined;
         } catch (error) {
@@ -615,7 +597,6 @@ export const channelTools = (tool: ToolFactory) => [
         }
       };
 
-      // The channel was just created public, so the private-channel checks are skipped.
       if (topic !== undefined) {
         await run("topic", async () => {
           await callSlack("conversations.setTopic", token, { channel: channel.id, topic }, context);
@@ -703,8 +684,10 @@ export const channelApprovals: ApprovalRule[] = [
     // Several visible, hard-to-undo writes in one call (a new channel, invitations that
     // notify people, a shared canvas), so every kickoff waits for a human.
     toolName: "slack_channel_kickoff",
-    check: ({ name, topic, purpose, invite, canvas, bookmark }) => {
-      const plan = [`Create public channel #${name}`];
+    // The hook sees only params, so only kickoff (via `isPrivate`) can say "private".
+    check: ({ name, isPrivate, topic, purpose, invite, canvas, bookmark }) => {
+      const kind = isPrivate === true ? "private" : "public";
+      const plan = [`Create ${kind} channel #${name}`];
       if (topic !== undefined) plan.push(`set its topic to "${topic}"`);
       if (purpose !== undefined) plan.push(`set its purpose to "${purpose}"`);
       if (Array.isArray(invite) && invite.length) plan.push(`invite ${invite.join(", ")}`);
@@ -713,7 +696,7 @@ export const channelApprovals: ApprovalRule[] = [
       return {
         title: "Kick off Slack channel",
         description: `${plan.join(", ")}.`,
-        target: `new channel #${name}`,
+        target: `new ${isPrivate === true ? "private " : ""}channel #${name}`,
       };
     },
   },

@@ -71,16 +71,16 @@ Tools marked † take an optional `channelId`. Inside a Slack conversation, leav
 |---|---|---|---|
 | `slack_channel_list` | Find channels (public, plus private ones the bot is in) by name, topic, or purpose, each with `isMember` (read-only) | bot | `channels:read` (plus `groups:read` for private channels) |
 | `slack_channel_members` | List a channel's member user IDs (read-only) | bot | `channels:read` (`groups:read` for private channels) |
-| `slack_channel_create` | Create a public channel | bot | `channels:manage` |
-| `slack_channel_archive` | Archive a public channel | bot | `channels:read`, `channels:manage` |
-| `slack_channel_unarchive` | Unarchive a public channel (the undo for archive) | bot | `channels:read`, `channels:manage` |
-| `slack_channel_rename` | Rename a public channel | bot | `channels:read`, `channels:manage` |
-| `slack_channel_set_topic` | Set a channel's topic | bot | `channels:read`, `channels:write.topic` |
-| `slack_channel_set_purpose` | Set a channel's purpose | bot | `channels:read`, `channels:manage` |
-| `slack_channel_invite` | Invite users to a channel | bot | `channels:read`, `channels:write.invites` |
+| `slack_channel_create` | Create a public channel, or a private one with `isPrivate: true` | bot | `channels:manage` (`groups:write` for private) |
+| `slack_channel_archive` | Archive a channel | bot | `channels:manage` (`groups:write` for private) |
+| `slack_channel_unarchive` | Unarchive a channel (the undo for archive) | bot | `channels:manage` (`groups:write` for private) |
+| `slack_channel_rename` | Rename a channel | bot | `channels:manage` (`groups:write` for private) |
+| `slack_channel_set_topic` | Set a channel's topic | bot | `channels:write.topic` (`groups:write.topic` for private) |
+| `slack_channel_set_purpose` | Set a channel's purpose | bot | `channels:manage` (`groups:write` for private) |
+| `slack_channel_invite` | Invite users to a channel | bot | `channels:write.invites` (`groups:write.invites` for private) |
 | `slack_channel_join` | Join a public channel as the bot | bot | `channels:read`, `channels:join` |
 | `slack_channel_leave` | Leave a public channel | bot | `channels:read`, `channels:manage` |
-| `slack_channel_kickoff` | Create a project channel with topic, purpose, invites, canvas, and bookmark in one call | bot | `channels:manage`, `channels:write.topic`, `channels:write.invites`, `canvases:write`, `bookmarks:write` |
+| `slack_channel_kickoff` | Create a project channel (public or private) with topic, purpose, invites, canvas, and bookmark in one call | bot | `channels:manage`, `channels:write.topic`, `channels:write.invites`, `canvases:write`, `bookmarks:write` (plus the `groups:write*` twins for private) |
 
 ### Slack Lists
 
@@ -158,11 +158,11 @@ Each secret can be a plain string or a SecretRef (`{ source, provider?, id }`). 
 
 The Slack app needs these scopes, split by token:
 
-**Bot token (`xoxb-`):** `assistant:write`, `bookmarks:read`, `bookmarks:write`, `canvases:read`, `canvases:write`, `channels:history`, `channels:join`, `channels:manage`, `channels:read`, `channels:write.invites`, `channels:write.topic`, `chat:write`, `files:read`, `files:write`, `im:write`, `lists:read`, `lists:write`, `metadata.message:read`, `remote_files:share`, `remote_files:write`, `usergroups:read`. Add `groups:history`, `im:history`, and `mpim:history` to read threads outside public channels.
+**Bot token (`xoxb-`):** `assistant:write`, `bookmarks:read`, `bookmarks:write`, `canvases:read`, `canvases:write`, `channels:history`, `channels:join`, `channels:manage`, `channels:read`, `channels:write.invites`, `channels:write.topic`, `chat:write`, `files:read`, `files:write`, `groups:write`, `groups:write.invites`, `groups:write.topic`, `im:write`, `lists:read`, `lists:write`, `metadata.message:read`, `remote_files:share`, `remote_files:write`, `usergroups:read`. Add `groups:history`, `im:history`, and `mpim:history` to read threads outside public channels.
 
 **User token (`xoxp-`):** `search:read`, `search:read.public`. Add `search:read.private`, `search:read.im`, `search:read.mpim`, `search:read.files` and `search:read.users` to let `slack_search_context` cover private channels, DMs, files and people.
 
-Every channel-management tool works on public channels only. The private-channel twins (`groups:write`, `groups:write.topic`, `groups:write.invites`) aren't part of this set, and the tools refuse private channels with an error that names the missing scope. `channels:join` is still pending on the Slack app (roadmap O-12), so joins fail until it's granted.
+The `groups:write*` scopes let the channel lifecycle tools act on private channels. Without them, those tools still work on public channels, and a private-channel call fails with an error naming the missing scope. `channels:join` is still pending on the Slack app (roadmap O-12), so joins fail until it's granted.
 
 The source of truth is `TOOL_SCOPES` in `src/doctor.ts`. Run `openclaw slack-workspace doctor` after changing the Slack app to confirm the reinstall picked up every scope.
 
@@ -198,13 +198,13 @@ When the call fails with `missing_scope`, `not_allowed_token_type`, `unknown_met
 
 ## Channel lifecycle
 
-`slack_channel_create`, `slack_channel_archive`, `slack_channel_unarchive`, `slack_channel_rename`, `slack_channel_set_topic`, `slack_channel_set_purpose`, and `slack_channel_invite` work on public channels only. The app holds `channels:manage`, `channels:write.topic`, and `channels:write.invites`, but not their private-channel twins (`groups:write`, `groups:write.topic`, `groups:write.invites`). Each tool that takes an existing channel looks it up with `conversations.info` first. If the channel is private, the tool fails with an error naming the `groups:write*` scope it would need, instead of Slack's bare `missing_scope`.
+`slack_channel_archive`, `slack_channel_unarchive`, `slack_channel_rename`, `slack_channel_set_topic`, `slack_channel_set_purpose`, and `slack_channel_invite` work on public channels and on private channels the bot is a member of. `slack_channel_create` makes a public channel unless you pass `isPrivate: true`. Private channels need the `groups:write`, `groups:write.topic`, and `groups:write.invites` twins of `channels:manage`, `channels:write.topic`, and `channels:write.invites`. On an install without them, Slack answers a private-channel call with `missing_scope`, and the tool turns that into an error naming the scope and pointing to `openclaw slack-workspace doctor`. A `channel_not_found` usually means a bad ID or a private channel the bot isn't in; invite the bot first. Archive, unarchive, and rename keep their `confirm: true` guard and approval on private channels too. The approval hook sees only the call's arguments, so its prompt names the channel ID rather than saying whether the channel is private.
 
-`slack_channel_kickoff` stands up a project room in one call: it creates a public channel, then runs whichever of these you pass: set the topic, set the purpose, invite users, create a canvas shared to the channel, and add a link bookmark. It's composed from the same calls as the single-purpose tools. Once the channel exists, a failed step doesn't stop the rest. Each step lands in `steps` with its error, and `complete` is `false` if any of them failed. If the create call fails, the tool throws, because nothing else can run without a channel. Every kickoff waits for a human's approval.
+`slack_channel_kickoff` stands up a project room in one call: it creates a channel, public by default or private with `isPrivate: true`, then runs whichever of these you pass: set the topic, set the purpose, invite users, create a canvas shared to the channel, and add a link bookmark. It's composed from the same calls as the single-purpose tools. Once the channel exists, a failed step doesn't stop the rest. Each step lands in `steps` with its error, and `complete` is `false` if any of them failed. If the create call fails, the tool throws, because nothing else can run without a channel. Every kickoff waits for a human's approval, and the prompt says whether the new channel is public or private.
 
 ## Channel membership
 
-`slack_channel_join` and `slack_channel_leave` add and remove the bot from a public channel. Neither waits for approval: both are visible and easy to reverse.
+`slack_channel_join` and `slack_channel_leave` add and remove the bot from a public channel. Neither waits for approval: both are visible and easy to reverse. `slack_channel_leave` refuses private channels, because the bot can't rejoin one without a member's invite.
 
 Most tools don't need an explicit join. When a bot-token call fails with `not_in_channel`, the client looks the channel up with `conversations.info`, joins it with `conversations.join` if it's public, and retries the original call once. The tool's result then carries `autoJoined: true`, so the agent knows it's now a member. The client never joins private channels, DMs, or group DMs; those fail with an error asking for an `/invite @OpenClaw`. Archived channels fail with an error that says so. A failed join or a failed retry is never retried again. Set `autoJoin: false` in the plugin config to turn this off, or list channel IDs in `autoJoinDeny` to keep the bot out of specific channels.
 
