@@ -373,6 +373,8 @@ clawhub package publish .
 
 The `npm-pack:` install proves the published package's shape and dependencies. It installs into your real OpenClaw state, so do it on a machine where that's fine. Tag the release (`git tag v<version>`) once it's published.
 
+If the repo-local `openclaw` CLI refuses to open your state database because a newer Gateway upgraded its schema, run `npm run ci` with a throwaway state directory: `OPENCLAW_STATE_DIR=$(mktemp -d) npm run ci`. The build, check, and validate steps don't need your real state.
+
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
