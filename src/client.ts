@@ -120,7 +120,8 @@ function retryAfterSeconds(response: Response): number {
   return Number.isFinite(seconds) && seconds >= 1 ? seconds : 1;
 }
 
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+/** Wait `ms`, rejecting early if `signal` aborts. */
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     signal?.throwIfAborted();
     const onAbort = () => {

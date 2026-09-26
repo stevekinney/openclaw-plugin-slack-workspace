@@ -66,6 +66,8 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
   slack_list_create: write,
   // Sets the given fields to fixed values; repeating it lands the same list.
   slack_list_update: idempotentWrite,
+  // Starts a Slack-side export job but changes nothing in the list.
+  slack_list_export: read,
   slack_list_schema: read,
   slack_list_item_create: write,
   // Sets each cell to a fixed value; repeating it lands the same result.

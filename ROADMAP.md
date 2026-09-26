@@ -1046,6 +1046,8 @@ fall back to the previous behavior, and say so in the tool result, with a
   - Acceptance criteria: either the tool ships with a bounded poll (maximum attempts and a timeout) and mocked tests, or the task is checked off with the finding recorded under Explicitly out of scope. Live check under "Live verification pending".
   - Tests: mocked start → pending → ready; mocked timeout.
   - Size: M
+  - Finding (2026-09-26, docs only): docs.slack.dev lists `lists:read` for both methods, and both take a bot token. `download.start` takes `list_id`, optional `format` (`csv` default, or `json`), `include_archived`, and the JSON-only `include_threads` and `include_attachments`, and returns a `job_id`. `download.get` takes `list_id` and `job_id`, must repeat the format and JSON options, and returns `status` (`COMPLETED` is the only documented value) and a `download_url` on files.slack.com. Shipped as `slack_list_export`, which polls every 2 s, at most 10 times, and gives up before 30 s, returning the `jobId` to resume.
+  - Live verification pending: on `lostgradient`, export a real List with the bot token and confirm (1) `lists:read` is enough, (2) the in-progress `status` values Slack actually sends, (3) how long a typical export takes, and (4) how long the `download_url` stays valid and whether it needs a token to fetch.
 
 - [ ] **S-12: Add remote-file read tools — slack_remote_file_info and slack_remote_file_list** — Wrap `files.remote.info` and a paginated `files.remote.list`, so the agent can find remote files it created in earlier turns.
   - Why: Today the agent can add, update, share and remove remote files, but it can't find them again after the original turn.
