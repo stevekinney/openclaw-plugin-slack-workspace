@@ -95,4 +95,6 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
   slack_remote_file_remove: write,
   // Each share posts the file into the channels again.
   slack_remote_file_share: write,
+  slack_remote_file_info: read,
+  slack_remote_file_list: read,
 };

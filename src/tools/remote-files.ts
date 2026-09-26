@@ -1,7 +1,8 @@
 import { Type } from "typebox";
 import { callSlack, resolveToken } from "../client.js";
 import type { ApprovalRule } from "../approvals.js";
-import type { ToolFactory } from "../schemas.js";
+import { cursorParams, toPage, walkPages } from "../pagination.js";
+import { channelIdParam, type ToolFactory } from "../schemas.js";
 
 /**
  * Remote files register an external document (a Linear issue, a generated report) as a
@@ -194,6 +195,78 @@ export const remoteFileTools = (tool: ToolFactory) => [
         true,
       );
       return { ...curateRemoteFile((data.file ?? {}) as RawRemoteFile), channelIds };
+    },
+  }),
+
+  tool({
+    name: "slack_remote_file_info",
+    label: "Get Slack remote file",
+    description:
+      "Look up a remote file added in an earlier turn, returning its file ID, external ID, " +
+      "URL, title, and permalink. " +
+      `${TARGET_NOTE} ${BOT_TOKEN_NOTE}`,
+    parameters: Type.Object({
+      fileId: fileIdParam(),
+      externalId: externalIdParam(),
+    }),
+    outputSchema: Type.Object(slackRemoteFile, { additionalProperties: false }),
+    async execute({ fileId, externalId }, config, context) {
+      context.signal?.throwIfAborted();
+      const target = remoteFileTarget({ fileId, externalId });
+      const data = await callSlack(
+        "files.remote.info",
+        resolveToken(config, "bot"),
+        target,
+        context,
+        true,
+      );
+      return curateRemoteFile((data.file ?? {}) as RawRemoteFile);
+    },
+  }),
+
+  tool({
+    name: "slack_remote_file_list",
+    label: "List Slack remote files",
+    description:
+      "List the remote files this app has added, optionally only those shared into one " +
+      "channel. Follows Slack's pages automatically; if `hasMore` is still true, call again " +
+      `with the returned \`cursor\` for the rest. ${BOT_TOKEN_NOTE}`,
+    parameters: Type.Object({
+      channelId: Type.Optional(
+        channelIdParam("Only list remote files shared into this channel. Omit for all channels."),
+      ),
+      cursor: Type.Optional(
+        Type.String({ description: "Resume from the `cursor` a previous call returned." }),
+      ),
+      limit: Type.Optional(
+        Type.Integer({ minimum: 1, maximum: 200, description: "Files per Slack page." }),
+      ),
+    }),
+    outputSchema: Type.Object(
+      {
+        files: Type.Array(Type.Object(slackRemoteFile, { additionalProperties: false })),
+        cursor: Type.Optional(Type.String()),
+        hasMore: Type.Boolean(),
+      },
+      { additionalProperties: false },
+    ),
+    async execute({ channelId, cursor, limit }, config, context) {
+      context.signal?.throwIfAborted();
+      const token = resolveToken(config, "bot");
+      const page = await walkPages(
+        async (request) => {
+          const body: Record<string, unknown> = channelId ? { channel: channelId } : {};
+          Object.assign(body, cursorParams(request));
+          const data = await callSlack("files.remote.list", token, body, context, true);
+          return toPage<RawRemoteFile>(data, "files");
+        },
+        { cursor, limit, signal: context.signal },
+      );
+      return {
+        files: page.items.map(curateRemoteFile),
+        ...(page.cursor ? { cursor: page.cursor } : {}),
+        hasMore: page.hasMore,
+      };
     },
   }),
 ];

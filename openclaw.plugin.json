@@ -223,7 +223,9 @@
       "slack_remote_file_add",
       "slack_remote_file_update",
       "slack_remote_file_remove",
-      "slack_remote_file_share"
+      "slack_remote_file_share",
+      "slack_remote_file_info",
+      "slack_remote_file_list"
     ]
   },
   "toolMetadata": {
@@ -685,6 +687,20 @@
     "slack_remote_file_share": {
       "sideEffecting": true,
       "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_remote_file_info": {
+      "sideEffecting": false,
+      "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_remote_file_list": {
+      "sideEffecting": false,
+      "replaySafe": true,
       "profiles": [
         "messaging"
       ]

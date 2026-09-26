@@ -13,6 +13,8 @@ const REMOTE_FILE_TOOLS = [
   "slack_remote_file_update",
   "slack_remote_file_remove",
   "slack_remote_file_share",
+  "slack_remote_file_info",
+  "slack_remote_file_list",
 ];
 
 /** A remote file as files.remote.* returns it, bookkeeping fields included. */
@@ -208,8 +210,110 @@ describe("slack_remote_file_share", () => {
   });
 });
 
+describe("slack_remote_file_info", () => {
+  it("reads a remote file by external ID with the bot token", async () => {
+    await withMockFetch(
+      () => ({ ok: true, file: rawRemoteFile() }),
+      async (calls) => {
+        const result = await runTool("slack_remote_file_info", { externalId: "linear-ENG-123" });
+        expect(calls.map((call) => call.method)).toEqual(["files.remote.info"]);
+        expect(calls[0].headers.authorization).toBe("Bearer xoxb-test");
+        expect(calls[0].body).toEqual({ external_id: "linear-ENG-123" });
+        expect(result).toEqual(curatedFile);
+        expect(Value.Check(toolNamed("slack_remote_file_info").outputSchema!, result)).toBe(true);
+      },
+    );
+  });
+
+  it("reads a remote file by Slack file ID", async () => {
+    await withMockFetch(
+      () => ({ ok: true, file: rawRemoteFile() }),
+      async (calls) => {
+        const result = await runTool("slack_remote_file_info", { fileId: "F0REMOTE" });
+        expect(calls[0].body).toEqual({ file: "F0REMOTE" });
+        expect(result).toEqual(curatedFile);
+      },
+    );
+  });
+});
+
+describe("slack_remote_file_list", () => {
+  it("walks every page of remote files in a channel", async () => {
+    const pages: Record<string, unknown>[] = [
+      {
+        ok: true,
+        files: [rawRemoteFile()],
+        response_metadata: { next_cursor: "page-2" },
+      },
+      {
+        ok: true,
+        files: [
+          rawRemoteFile({
+            id: "F0REMOTE2",
+            external_id: "linear-ENG-124",
+            external_url: "https://linear.example/ENG-124",
+            title: "ENG-124",
+            permalink: "https://example.slack.com/files/U0BOT/F0REMOTE2/eng-124",
+          }),
+        ],
+        response_metadata: { next_cursor: "" },
+      },
+    ];
+    await withMockFetch(
+      () => pages.shift()!,
+      async (calls) => {
+        const result = await runTool("slack_remote_file_list", { channelId: "C0ENG", limit: 1 });
+        expect(calls.map((call) => call.method)).toEqual([
+          "files.remote.list",
+          "files.remote.list",
+        ]);
+        expect(calls[0].headers.authorization).toBe("Bearer xoxb-test");
+        expect(calls[0].body).toEqual({ channel: "C0ENG", limit: "1" });
+        expect(calls[1].body).toEqual({ channel: "C0ENG", limit: "1", cursor: "page-2" });
+        expect(result).toEqual({
+          files: [
+            curatedFile,
+            {
+              fileId: "F0REMOTE2",
+              externalId: "linear-ENG-124",
+              externalUrl: "https://linear.example/ENG-124",
+              title: "ENG-124",
+              permalink: "https://example.slack.com/files/U0BOT/F0REMOTE2/eng-124",
+            },
+          ],
+          hasMore: false,
+        });
+        expect(Value.Check(toolNamed("slack_remote_file_list").outputSchema!, result)).toBe(true);
+      },
+    );
+  });
+
+  it("resumes from a cursor and returns the next one when pages remain", async () => {
+    let page = 0;
+    await withMockFetch(
+      () => ({
+        ok: true,
+        files: [rawRemoteFile()],
+        response_metadata: { next_cursor: `page-${++page}` },
+      }),
+      async (calls) => {
+        const result = await runTool("slack_remote_file_list", { cursor: "start" });
+        expect(calls).toHaveLength(10);
+        expect(calls[0].body).toEqual({ cursor: "start" });
+        expect(result).toMatchObject({ cursor: "page-10", hasMore: true });
+        expect(Value.Check(toolNamed("slack_remote_file_list").outputSchema!, result)).toBe(true);
+      },
+    );
+  });
+});
+
 describe("remote file targeting", () => {
-  it.each(["slack_remote_file_update", "slack_remote_file_remove", "slack_remote_file_share"])(
+  it.each([
+    "slack_remote_file_update",
+    "slack_remote_file_remove",
+    "slack_remote_file_share",
+    "slack_remote_file_info",
+  ])(
     "%s requires exactly one of fileId or externalId",
     async (name) => {
       await withMockFetch(
