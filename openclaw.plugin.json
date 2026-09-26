@@ -1,7 +1,7 @@
 {
   "id": "slack-workspace",
   "name": "Slack Workspace",
-  "description": "Slack workspace tools: identity and message scheduling, search, structured messaging (tables, plans, charts, rich text), raw Block Kit messages, canvases, channel bookmarks, public-channel lifecycle (create, archive, rename, topic, purpose, invite, join, leave, one-call kickoff), Slack Lists, file uploads, Workflow Builder webhook triggers, read-only user group lookups, and remote files (external documents as native Slack files).",
+  "description": "Slack workspace tools: identity and message scheduling, search, structured messaging (tables, plans, charts, rich text), raw Block Kit messages, canvases, channel bookmarks, public-channel lifecycle (create, archive, unarchive, rename, topic, purpose, invite, join, leave, one-call kickoff), Slack Lists, file uploads, Workflow Builder webhook triggers, read-only user group lookups, and remote files (external documents as native Slack files).",
   "version": "0.1.0",
   "categories": [
     "inbox-collaboration"
@@ -192,6 +192,7 @@
       "slack_channel_members",
       "slack_channel_create",
       "slack_channel_archive",
+      "slack_channel_unarchive",
       "slack_channel_rename",
       "slack_channel_set_topic",
       "slack_channel_set_purpose",
@@ -455,6 +456,13 @@
       ]
     },
     "slack_channel_archive": {
+      "sideEffecting": true,
+      "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_channel_unarchive": {
       "sideEffecting": true,
       "replaySafe": false,
       "profiles": [
