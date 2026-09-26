@@ -69,6 +69,8 @@ Tools marked † take an optional `channelId`. Inside a Slack conversation, leav
 
 | Tool | What it does | Token | Scopes |
 |---|---|---|---|
+| `slack_channel_list` | Find channels (public, plus private ones the bot is in) by name, topic, or purpose, each with `isMember` (read-only) | bot | `channels:read` (plus `groups:read` for private channels) |
+| `slack_channel_members` | List a channel's member user IDs (read-only) | bot | `channels:read` (`groups:read` for private channels) |
 | `slack_channel_create` | Create a public channel | bot | `channels:manage` |
 | `slack_channel_archive` | Archive a public channel | bot | `channels:read`, `channels:manage` |
 | `slack_channel_rename` | Rename a public channel | bot | `channels:read`, `channels:manage` |
@@ -186,6 +188,12 @@ When the call fails with `missing_scope`, `not_allowed_token_type`, `unknown_met
 ## Canvas discovery
 
 `slack_canvas_list` finds canvases you don't already have an ID for. Slack stores canvases as files, so the tool calls `files.list` with `types=canvas`, the lookup Slack's canvas docs recommend. It uses the bot token and the `files:read` scope the app already holds, not a search scope. The bot sees only canvases it created or that were shared somewhere it can read. `files.list` pages by `page` and `count` instead of a cursor, so the result carries `page`, `pages`, `total`, and `hasMore`.
+
+## Channel discovery
+
+`slack_channel_list` finds channels the agent doesn't already have an ID for. It calls `conversations.list` for every public channel in the workspace plus the private channels the bot is in, and leaves archived channels out unless you pass `excludeArchived: false`. Pass `query` to keep only channels whose name, topic, or purpose contains that text, ignoring case. The filter runs on each page the tool fetches, so a narrow query can come back with few results and `hasMore: true`. Each channel carries `isMember`, so the agent can decide what to join with `slack_channel_join`. If the bot token lacks `groups:read`, Slack refuses the private-channel half of the request. The tool then lists public channels only and returns `privateIncluded: false`.
+
+`slack_channel_members` returns a channel's member user IDs from `conversations.members`. Both tools follow Slack's cursor for up to `maxPages` pages (default 10). If `hasMore` is still true, call again with the returned `cursor`. Neither waits for approval, because both are read-only.
 
 ## Channel lifecycle
 

@@ -50,6 +50,8 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
   // Sets the given fields to fixed values; repeating it lands the same bookmark.
   slack_bookmark_edit: idempotentWrite,
   slack_bookmark_remove: write,
+  slack_channel_list: read,
+  slack_channel_members: read,
   slack_channel_create: write,
   slack_channel_archive: write,
   slack_channel_rename: write,

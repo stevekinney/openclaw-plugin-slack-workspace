@@ -188,6 +188,8 @@
       "slack_bookmark_add",
       "slack_bookmark_edit",
       "slack_bookmark_remove",
+      "slack_channel_list",
+      "slack_channel_members",
       "slack_channel_create",
       "slack_channel_archive",
       "slack_channel_rename",
@@ -427,6 +429,20 @@
     "slack_bookmark_remove": {
       "sideEffecting": true,
       "replaySafe": false,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_channel_list": {
+      "sideEffecting": false,
+      "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_channel_members": {
+      "sideEffecting": false,
+      "replaySafe": true,
       "profiles": [
         "messaging"
       ]
