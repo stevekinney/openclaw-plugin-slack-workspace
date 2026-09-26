@@ -381,10 +381,10 @@ const decodeEntities = (text: string) =>
   text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 
 /**
- * A text cell from Slack mrkdwn: `<@U…>` and `<#C…>` become real mentions, `<url|label>`
+ * Rich text blocks from Slack mrkdwn: `<@U…>` and `<#C…>` become real mentions, `<url|label>`
  * a link, and `<!here>`-style broadcasts plain text, so nothing notifies from a List.
  */
-export function richTextCell(columnId: string, text: string): Record<string, unknown> {
+function richTextBlocks(text: string): Record<string, unknown>[] {
   const elements: Record<string, unknown>[] = [];
   const pushText = (segment: string) => {
     if (segment) elements.push({ type: "text", text: decodeEntities(segment) });
@@ -401,10 +401,12 @@ export function richTextCell(columnId: string, text: string): Record<string, unk
     else elements.push({ type: "link", url: target, ...(label ? { text: decodeEntities(label) } : {}) });
   }
   pushText(text.slice(last));
-  return {
-    column_id: columnId,
-    rich_text: [{ type: "rich_text", elements: [{ type: "rich_text_section", elements }] }],
-  };
+  return [{ type: "rich_text", elements: [{ type: "rich_text_section", elements }] }];
+}
+
+/** A text cell from Slack mrkdwn, shaped as {@link richTextBlocks} describes. */
+export function richTextCell(columnId: string, text: string): Record<string, unknown> {
+  return { column_id: columnId, rich_text: richTextBlocks(text) };
 }
 
 /** The columns an action-item row fills: the task text, and the todo columns when present. */
@@ -512,6 +514,55 @@ export const listTools = (tool: ToolFactory) => [
         listId: String(data.list_id ?? ""),
         columns: (metadata.schema ?? []).map(curateColumn),
       };
+    },
+  }),
+  tool({
+    name: "slack_list_update",
+    label: "Update Slack list",
+    description:
+      "Change a Slack List's name, description, or todo mode in place, keeping its list_id and row IDs. Columns can't be changed after creation.",
+    parameters: Type.Object({
+      listId: Type.String({ description: "List ID, e.g. F0123ABCD." }),
+      name: Type.Optional(Type.String({ minLength: 1, description: "New list name." })),
+      description: Type.Optional(
+        Type.String({
+          description: "New list description in Slack mrkdwn; <@U…> and <#C…> become mentions.",
+        }),
+      ),
+      todoMode: Type.Optional(
+        Type.Boolean({
+          description: "Turn task-tracking columns (completed, assignee, due date) on or off.",
+        }),
+      ),
+    }),
+    outputSchema: Type.Object(
+      {
+        listId: Type.String(),
+        updated: Type.Array(
+          Type.Union([Type.Literal("name"), Type.Literal("description"), Type.Literal("todoMode")]),
+        ),
+      },
+      { additionalProperties: false },
+    ),
+    async execute({ listId, name, description, todoMode }, config, context) {
+      context.signal?.throwIfAborted();
+      const body: Record<string, unknown> = { id: listId };
+      const updated: ("name" | "description" | "todoMode")[] = [];
+      if (name !== undefined) {
+        body.name = name;
+        updated.push("name");
+      }
+      if (description !== undefined) {
+        body.description_blocks = richTextBlocks(description);
+        updated.push("description");
+      }
+      if (todoMode !== undefined) {
+        body.todo_mode = todoMode;
+        updated.push("todoMode");
+      }
+      if (updated.length === 0) throw new Error("Set name, description, or todoMode to change.");
+      await callSlack("slackLists.update", resolveToken(config), body, context);
+      return { listId, updated };
     },
   }),
   tool({

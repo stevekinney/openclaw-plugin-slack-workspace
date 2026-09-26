@@ -86,6 +86,7 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind | "none"; scopes: st
     ],
   },
   slack_list_create: { token: "bot", scopes: ["lists:write"] },
+  slack_list_update: { token: "bot", scopes: ["lists:write"] },
   slack_list_schema: { token: "bot", scopes: ["lists:read"] },
   // Create and update read the schema first to resolve column names.
   slack_list_item_create: { token: "bot", scopes: ["lists:read", "lists:write"] },

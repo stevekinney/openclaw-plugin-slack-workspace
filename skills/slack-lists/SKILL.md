@@ -44,7 +44,8 @@ columns right in the `slack_list_create` call:
 - **Pick types carefully.** A `text` column can't become a `select` later. If you
   want filtering or colored labels, use `select` from the start.
 - **`todo_mode` is the one exception.** It's the only column-related setting
-  `slackLists.update` can still change (`todoMode` in `slack_list_create`).
+  `slackLists.update` can still change (`todoMode` in `slack_list_create` and
+  `slack_list_update`, which also renames a list or changes its description).
 
 If the schema turns out wrong, the only fix is a new list. `copyFromListId` copies
 columns (and with `includeCopiedListRecords`, items), but the new list has a new
