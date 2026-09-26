@@ -32,6 +32,7 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
   slack_blocks_send: write,
   slack_blocks_update: idempotentWrite,
   slack_message_get: read,
+  slack_message_delete: write,
   slack_post_ephemeral: write,
   slack_canvas_create: write,
   slack_canvas_edit: write,
