@@ -84,7 +84,9 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind | "none"; scopes: st
   // lists:read resolves an existing list's columns; groups:/im:/mpim:history as for canvases.
   slack_list_from_thread: { token: "bot", scopes: ["channels:history", "lists:read", "lists:write"] },
   slack_file_upload: { token: "bot", scopes: ["files:write"] },
-  slack_assistant_set_title: { token: "bot", scopes: ["assistant:write"] },
+  // agents.sessions.rename needs chat:write; without it Slack answers missing_scope and the
+  // tool falls back to assistant.threads.setTitle, which needs assistant:write.
+  slack_assistant_set_title: { token: "bot", scopes: ["chat:write"] },
   slack_assistant_suggest_prompts: { token: "bot", scopes: ["assistant:write"] },
   // POSTs to a configured webhook URL; the URL is the credential, not a Slack token.
   slack_workflow_trigger_run: { token: "none", scopes: [] },
