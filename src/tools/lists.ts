@@ -6,6 +6,8 @@ import {
   accessTargetOutput,
   accessTargetParams,
   assertAccessLevel,
+  describeAccessTargets,
+  isWideReachShare,
   slackAccessTarget,
   type AccessLevel,
   type AccessTarget,
@@ -742,7 +744,7 @@ export const listTools = (tool: ToolFactory) => [
     name: "slack_list_access_set",
     label: "Set Slack list access",
     description:
-      "Grant channels or users read, write, or owner access to a Slack List. Set channelIds or userIds, not both; owner applies to users only. Setting access again changes the level.",
+      "Grant channels or users read, write, or owner access to a Slack List. Set channelIds or userIds, not both; owner applies to users only. Setting access again changes the level. Channel shares and owner grants wait for human approval; user read/write grants do not.",
     parameters: Type.Object({
       listId: Type.String({ description: "List ID, e.g. F0123ABCD." }),
       ...accessTargetParams("grant access"),
@@ -941,14 +943,20 @@ export const listTools = (tool: ToolFactory) => [
 export const listApprovals: ApprovalRule[] = [
   {
     toolName: "slack_list_access_delete",
-    check: ({ listId, channelIds, userIds }) => {
-      const ids = (value: unknown) => (Array.isArray(value) ? value.map(String) : []);
-      const channels = ids(channelIds);
-      const who = channels.length ? `channels ${channels.join(", ")}` : `users ${ids(userIds).join(", ")}`;
+    check: (params) => ({
+      title: "Revoke Slack list access",
+      description: `Revoke access to list ${params.listId} for ${describeAccessTargets(params)}.`,
+      target: `list ${params.listId}`,
+    }),
+  },
+  {
+    toolName: "slack_list_access_set",
+    check: (params) => {
+      if (!isWideReachShare(params)) return undefined;
       return {
-        title: "Revoke Slack list access",
-        description: `Revoke access to list ${listId} for ${who}.`,
-        target: `list ${listId}`,
+        title: "Share Slack list widely",
+        description: `Grant ${params.accessLevel} access to list ${params.listId} for ${describeAccessTargets(params)}. Revoking access later can't un-show what people already saw.`,
+        target: `list ${params.listId}`,
       };
     },
   },

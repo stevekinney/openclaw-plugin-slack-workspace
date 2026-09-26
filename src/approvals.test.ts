@@ -68,6 +68,34 @@ const gated: Array<[string, Record<string, unknown>, string]> = [
   ["slack_remote_file_remove", { externalId: "linear-ENG-123" }, "files.remote.remove"],
   ["slack_canvas_access_delete", { canvasId: "F0TEST", channelIds: ["C0TEST"] }, "canvases.access.delete"],
   ["slack_list_access_delete", { listId: "F0LIST", userIds: ["U0TEST"] }, "slackLists.access.delete"],
+  [
+    "slack_canvas_access_set",
+    { canvasId: "F0TEST", channelIds: ["C0TEST"], accessLevel: "read" },
+    "canvases.access.set",
+  ],
+  [
+    "slack_canvas_access_set",
+    { canvasId: "F0TEST", userIds: ["U0TEST"], accessLevel: "owner" },
+    "canvases.access.set",
+  ],
+  [
+    "slack_list_access_set",
+    { listId: "F0LIST", channelIds: ["C0TEST"], accessLevel: "write" },
+    "slackLists.access.set",
+  ],
+  [
+    "slack_list_access_set",
+    { listId: "F0LIST", userIds: ["U0TEST"], accessLevel: "owner" },
+    "slackLists.access.set",
+  ],
+];
+
+/** Access grants to individual users below owner: narrow and easy to revoke, so ungated. */
+const ungatedShares: Array<[string, Record<string, unknown>, string]> = [
+  ["slack_canvas_access_set", { canvasId: "F0TEST", userIds: ["U0TEST"], accessLevel: "read" }, "canvases.access.set"],
+  ["slack_canvas_access_set", { canvasId: "F0TEST", userIds: ["U0TEST"], accessLevel: "write" }, "canvases.access.set"],
+  ["slack_list_access_set", { listId: "F0LIST", userIds: ["U0TEST"], accessLevel: "read" }, "slackLists.access.set"],
+  ["slack_list_access_set", { listId: "F0LIST", userIds: ["U0TEST"], accessLevel: "write" }, "slackLists.access.set"],
 ];
 
 /** Gated tools whose approved path makes several Slack calls; only the deny path is uniform. */
@@ -85,6 +113,7 @@ describe("approval registry", () => {
     expect(APPROVAL_RULES.map((rule) => rule.toolName).sort()).toEqual([
       "slack_bookmark_remove",
       "slack_canvas_access_delete",
+      "slack_canvas_access_set",
       "slack_canvas_delete",
       "slack_canvas_edit",
       "slack_canvas_status_update",
@@ -93,6 +122,7 @@ describe("approval registry", () => {
       "slack_channel_rename",
       "slack_channel_unarchive",
       "slack_list_access_delete",
+      "slack_list_access_set",
       "slack_list_item_delete",
       "slack_list_items_delete_multiple",
       "slack_message_delete",
@@ -170,6 +200,29 @@ describe("approval registry", () => {
     ).toBeUndefined();
   });
 
+  it.each(ungatedShares)("does not gate a user read/write grant via %s", (toolName, params) => {
+    expect(approvalFor(toolName, params)).toBeUndefined();
+  });
+
+  it("names the share's reach and target in the request", () => {
+    const channelShare = approvalFor("slack_canvas_access_set", {
+      canvasId: "F0TEST",
+      channelIds: ["C0A", "C0B"],
+      accessLevel: "write",
+    });
+    expect(channelShare).toMatchObject({ scope: { target: "canvas F0TEST" } });
+    expect(channelShare?.description).toContain("channels C0A, C0B");
+    expect(channelShare?.description).toContain("write");
+    const ownerGrant = approvalFor("slack_list_access_set", {
+      listId: "F0LIST",
+      userIds: ["U0TEST"],
+      accessLevel: "owner",
+    });
+    expect(ownerGrant).toMatchObject({ scope: { target: "list F0LIST" } });
+    expect(ownerGrant?.description).toContain("users U0TEST");
+    expect(ownerGrant?.description).toContain("owner");
+  });
+
   it("does not gate tools without a rule", () => {
     expect(approvalFor("slack_bookmark_add", { channelId: "C0TEST" })).toBeUndefined();
     expect(approvalFor("slack_identity", {})).toBeUndefined();
@@ -236,6 +289,22 @@ describe("before_tool_call approvals", () => {
       async (calls) => {
         const { approval, executed } = await callWithApproval(toolName, params, "allow-once");
         expect(approval).toBeDefined();
+        expect(executed).toBe(true);
+        expect(writes(calls)).toEqual([method]);
+      },
+    );
+  });
+
+  it.each(ungatedShares)("lets a user read/write grant via %s through without asking", async (
+    toolName,
+    params,
+    method,
+  ) => {
+    await withMockFetch(
+      () => slackResponse({ ok: true }),
+      async (calls) => {
+        const { approval, executed } = await callWithApproval(toolName, params, "deny");
+        expect(approval).toBeUndefined();
         expect(executed).toBe(true);
         expect(writes(calls)).toEqual([method]);
       },

@@ -14,6 +14,8 @@ import {
   accessTargetOutput,
   accessTargetParams,
   assertAccessLevel,
+  describeAccessTargets,
+  isWideReachShare,
   slackAccessTarget,
   type AccessLevel,
   type AccessTarget,
@@ -699,7 +701,7 @@ export const canvasTools = (tool: ToolFactory) => [
     name: "slack_canvas_access_set",
     label: "Set Slack canvas access",
     description:
-      "Grant channels or users read, write, or owner access to a canvas. Set channelIds or userIds, not both; owner applies to users only. Setting access again changes the level.",
+      "Grant channels or users read, write, or owner access to a canvas. Set channelIds or userIds, not both; owner applies to users only. Setting access again changes the level. Channel shares and owner grants wait for human approval; user read/write grants do not.",
     parameters: Type.Object({
       canvasId: Type.String({ description: "Canvas ID, e.g. F0166DCSTS7." }),
       ...accessTargetParams("grant access"),
@@ -969,14 +971,18 @@ export const canvasTools = (tool: ToolFactory) => [
 ];
 
 /** `replace` overwrites and `delete` removes canvas content; Slack offers no API to restore it. */
-/** "channels C1, C2" or "users U1" for an access change's prompt. */
-const describeAccessTargets = ({ channelIds, userIds }: Record<string, unknown>) => {
-  const ids = (value: unknown) => (Array.isArray(value) ? value.map(String) : []);
-  const channels = ids(channelIds);
-  return channels.length ? `channels ${channels.join(", ")}` : `users ${ids(userIds).join(", ")}`;
-};
-
 export const canvasApprovals: ApprovalRule[] = [
+  {
+    toolName: "slack_canvas_access_set",
+    check: (params) => {
+      if (!isWideReachShare(params)) return undefined;
+      return {
+        title: "Share Slack canvas widely",
+        description: `Grant ${params.accessLevel} access to canvas ${params.canvasId} for ${describeAccessTargets(params)}. Revoking access later can't un-show what people already saw.`,
+        target: `canvas ${params.canvasId}`,
+      };
+    },
+  },
   {
     toolName: "slack_canvas_access_delete",
     check: (params) => ({
