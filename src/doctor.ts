@@ -12,6 +12,9 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind | "none"; scopes: st
   // auth.test needs no scope.
   slack_identity: { token: "bot", scopes: [] },
   slack_search: { token: "user", scopes: ["search:read"] },
+  // search:read.private, .im, .mpim, .files and .users widen coverage; without them
+  // Slack answers missing_scope and the tool falls back to search.messages.
+  slack_search_context: { token: "user", scopes: ["search:read.public"] },
   slack_schedule_message: { token: "bot", scopes: ["chat:write"] },
   slack_schedule_reschedule: { token: "bot", scopes: ["chat:write"] },
   // conversations.open finds or opens the DM when reminding a user.

@@ -4,7 +4,7 @@ An OpenClaw plugin that gives the agent Slack workspace tools the bundled Slack 
 
 ## Tools
 
-Every tool uses the bot token except `slack_search`, which needs the user token; `slack_identity`, which checks whichever token you ask about; and `slack_workflow_trigger_run`, which uses no Slack token at all. The scopes listed are the ones Slack's docs require for the methods each tool calls. `openclaw slack-workspace doctor` checks them against what your tokens actually hold (see [Scope doctor](#scope-doctor)).
+Every tool uses the bot token except `slack_search` and `slack_search_context`, which need the user token; `slack_identity`, which checks whichever token you ask about; and `slack_workflow_trigger_run`, which uses no Slack token at all. The scopes listed are the ones Slack's docs require for the methods each tool calls. `openclaw slack-workspace doctor` checks them against what your tokens actually hold (see [Scope doctor](#scope-doctor)).
 
 Tools marked † take an optional `channelId`. Inside a Slack conversation, leaving it out targets the current channel. Outside one (cron jobs, automations, other chat platforms), it's required.
 
@@ -13,7 +13,8 @@ Tools marked † take an optional `channelId`. Inside a Slack conversation, leav
 | Tool | What it does | Token | Scopes |
 |---|---|---|---|
 | `slack_identity` | Report who a token authenticates as and which scopes it holds | bot or user (`tokenKind`) | none |
-| `slack_search` | Search messages or files as the authorizing user, including their private channels and DMs | **user** | `search:read` |
+| `slack_search` | Keyword search over messages or files as the authorizing user, including their private channels and DMs. Points the agent to `slack_search_context` for questions | **user** | `search:read` |
+| `slack_search_context` | Real-time Search (`assistant.search.context`): messages ranked by meaning, each with its permalink and surrounding messages; optionally files, channels and users. Falls back to `search.messages` (`mode: "legacy"`) when unavailable | **user** | `search:read.public` (plus `search:read.private`, `.im`, `.mpim`, `.files`, `.users` for wider coverage) |
 
 ### Messages and Block Kit
 
@@ -142,8 +143,8 @@ Configure the plugin under `plugins.entries.slack-workspace.config` in your Open
 
 | Key | Type | What it's for |
 |---|---|---|
-| `botToken` | string or SecretRef | The `xoxb-` bot token. Every tool except `slack_search` and `slack_workflow_trigger_run` uses it, and `slack_identity` uses it by default. Falls back to `SLACK_BOT_TOKEN`. |
-| `userToken` | string or SecretRef | The `xoxp-` user token. Only `slack_search` needs it (and `slack_identity` with `tokenKind: "user"`), because Slack's `search.*` methods reject bot tokens. Falls back to `SLACK_USER_TOKEN`. Leave it out if you don't need search. |
+| `botToken` | string or SecretRef | The `xoxb-` bot token. Every tool except `slack_search`, `slack_search_context` and `slack_workflow_trigger_run` uses it, and `slack_identity` uses it by default. Falls back to `SLACK_BOT_TOKEN`. |
+| `userToken` | string or SecretRef | The `xoxp-` user token. Only `slack_search` and `slack_search_context` need it (and `slack_identity` with `tokenKind: "user"`), because Slack's `search.*` methods reject bot tokens and `assistant.search.context` needs an `action_token` with a bot token. Falls back to `SLACK_USER_TOKEN`. Leave it out if you don't need search. |
 | `workflowTriggers` | map of name to string or SecretRef | Workflow Builder webhook trigger URLs for `slack_workflow_trigger_run`. See [Workflow triggers](#workflow-triggers). |
 | `autoJoin` | boolean, default `true` | Join a public channel and retry once when a bot-token call fails with `not_in_channel`. See [Channel membership](#channel-membership). |
 | `autoJoinDeny` | array of channel IDs | Channels the bot never auto-joins. |
@@ -156,7 +157,7 @@ The Slack app needs these scopes, split by token:
 
 **Bot token (`xoxb-`):** `assistant:write`, `bookmarks:read`, `bookmarks:write`, `canvases:read`, `canvases:write`, `channels:history`, `channels:join`, `channels:manage`, `channels:read`, `channels:write.invites`, `channels:write.topic`, `chat:write`, `files:read`, `files:write`, `im:write`, `lists:read`, `lists:write`, `metadata.message:read`, `remote_files:share`, `remote_files:write`, `usergroups:read`. Add `groups:history`, `im:history`, and `mpim:history` to read threads outside public channels.
 
-**User token (`xoxp-`):** `search:read`.
+**User token (`xoxp-`):** `search:read`, `search:read.public`. Add `search:read.private`, `search:read.im`, `search:read.mpim`, `search:read.files` and `search:read.users` to let `slack_search_context` cover private channels, DMs, files and people.
 
 Every channel-management tool works on public channels only. The private-channel twins (`groups:write`, `groups:write.topic`, `groups:write.invites`) aren't part of this set, and the tools refuse private channels with an error that names the missing scope. `channels:join` is still pending on the Slack app (roadmap O-12), so joins fail until it's granted.
 
@@ -175,6 +176,12 @@ The plugin ships three agent skills in `skills/`, which teach the agent when and
 A `before_tool_call` hook asks a human to approve destructive calls before they reach Slack: `slack_canvas_edit` with `operation: "replace"` or `"delete"`, `slack_canvas_delete`, `slack_bookmark_remove`, `slack_scheduled_cancel`, `slack_channel_archive`, `slack_channel_rename`, `slack_list_item_delete`, `slack_list_items_delete_multiple`, `slack_remote_file_remove`, and every `slack_channel_kickoff`. Reviewers get `allow-once` or `deny` only; the plugin doesn't persist trust, so it never offers `allow-always`. The rules live in `src/approvals.ts`. When you add an irreversible or disruptive tool, register its rule there in the same change. `slack_canvas_status_update` is exempt on purpose: it exists for unattended scheduled runs, and it only ever rewrites the one section under its own heading, refusing a heading that matches more than one section.
 
 Archive and rename also require an explicit `confirm: true` argument. The schema has no default for it, and the tool refuses the call before contacting Slack without it. That guard still holds in cron jobs and other automation where no one is around to approve.
+
+## Real-time Search
+
+`slack_search_context` is the tool for questions like "what did we decide about X?". It calls `assistant.search.context` with the user token, which needs no `action_token` (only bot-token calls do). Each message hit comes back with its permalink and, by default, the messages just before and after it, so the agent can read the decision in context. Pass `contentTypes` to also search files, channels or users, and `channelTypes` to narrow the conversations searched (default: all four types). Results are turn-local: the tool description tells the agent to answer from them and not store them. Slack rate-limits the method to roughly 10 calls a minute per user; short `Retry-After` waits are retried, longer ones fail with a clear error rather than falling back.
+
+When the call fails with `missing_scope`, `not_allowed_token_type`, `unknown_method`, `feature_not_enabled`, or `assistant_search_context_disabled`, the tool runs the same query through `search.messages` instead and returns `mode: "legacy"`, a one-line `reason`, and a `doctorHint`. Legacy results are messages only, without context messages. `slack_search` stays for exact keyword and modifier queries, files, and numbered paging.
 
 ## Canvas discovery
 

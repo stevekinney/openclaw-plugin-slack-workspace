@@ -15,6 +15,7 @@ describe("slack-workspace", () => {
     expect(getToolPluginMetadata(entry)?.tools.map((tool) => tool.name)).toEqual([
       "slack_identity",
       "slack_search",
+      "slack_search_context",
       "slack_schedule_message",
       "slack_schedule_reschedule",
       "slack_remind",
