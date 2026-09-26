@@ -18,6 +18,7 @@ const accepts = (name: string, params: Record<string, unknown>) =>
 const READ_ONLY = [
   "slack_identity",
   "slack_search",
+  "slack_search_context",
   "slack_scheduled_list",
   "slack_canvas_sections",
   "slack_canvas_list",
@@ -31,8 +32,8 @@ const READ_ONLY = [
 ];
 
 describe("outputSchema", () => {
-  it("is declared by all 59 tools", () => {
-    expect(tools).toHaveLength(59);
+  it("is declared by all 60 tools", () => {
+    expect(tools).toHaveLength(60);
     for (const tool of tools) expect(tool.outputSchema, tool.name).toBeDefined();
   });
 });

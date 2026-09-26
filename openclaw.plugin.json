@@ -160,6 +160,7 @@
     "tools": [
       "slack_identity",
       "slack_search",
+      "slack_search_context",
       "slack_schedule_message",
       "slack_schedule_reschedule",
       "slack_remind",
@@ -228,6 +229,13 @@
       ]
     },
     "slack_search": {
+      "sideEffecting": false,
+      "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_search_context": {
       "sideEffecting": false,
       "replaySafe": true,
       "profiles": [

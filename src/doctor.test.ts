@@ -32,7 +32,7 @@ const BOT_SCOPES = [
   "remote_files:write",
   "usergroups:read",
 ];
-const USER_SCOPES = ["search:read"];
+const USER_SCOPES = ["search:read", "search:read.public"];
 
 /** Answer `auth.test` per token, the way Slack reports scopes: in `x-oauth-scopes`. */
 const authTest =
@@ -113,8 +113,14 @@ describe("auditScopes", () => {
         { tool: "slack_canvas_from_thread", missing: ["canvases:write"] },
         { tool: "slack_channel_kickoff", missing: ["canvases:write"] },
       ]);
-      expect(userAudit).toMatchObject({ status: "missing_scopes", missing: ["search:read"] });
-      expect(userAudit.affectedTools).toEqual([{ tool: "slack_search", missing: ["search:read"] }]);
+      expect(userAudit).toMatchObject({
+        status: "missing_scopes",
+        missing: ["search:read", "search:read.public"],
+      });
+      expect(userAudit.affectedTools).toEqual([
+        { tool: "slack_search", missing: ["search:read"] },
+        { tool: "slack_search_context", missing: ["search:read.public"] },
+      ]);
     });
   });
 
