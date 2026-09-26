@@ -1,8 +1,29 @@
 {
-  "name": "openclaw-plugin-slack-workspace",
+  "name": "@stevekinney/openclaw-slack-workspace",
   "version": "0.1.0",
+  "description": "OpenClaw plugin with Slack workspace tools the bundled Slack channel plugin lacks: scheduling, search, structured messages, canvases, bookmarks, channel management, Slack Lists, files, and Workflow Builder triggers.",
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "slack",
+    "block-kit",
+    "canvases",
+    "slack-lists"
+  ],
+  "license": "MIT",
+  "author": "Steve Kinney",
+  "homepage": "https://github.com/stevekinney/openclaw-plugin-slack-workspace#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stevekinney/openclaw-plugin-slack-workspace.git"
+  },
+  "bugs": {
+    "url": "https://github.com/stevekinney/openclaw-plugin-slack-workspace/issues"
+  },
   "type": "module",
-  "private": true,
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -10,17 +31,19 @@
     "plugin:check": "npm run build && openclaw plugins build --check --entry ./dist/index.js",
     "plugin:validate": "npm run build && openclaw plugins validate --entry ./dist/index.js",
     "test": "vitest run --config ./vitest.config.ts",
-    "ci": "npm run typecheck && npm run plugin:check && openclaw plugins validate --entry ./dist/index.js && npm test"
+    "ci": "npm run typecheck && npm run plugin:check && openclaw plugins validate --entry ./dist/index.js && npm test",
+    "prepack": "npm run build"
   },
   "files": [
     "dist",
     "assets",
     "skills",
     "openclaw.plugin.json",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "peerDependencies": {
-    "openclaw": ">=2026.5.17"
+    "openclaw": ">=2026.9.5"
   },
   "dependencies": {
     "typebox": "^1.1.38"
@@ -35,10 +58,12 @@
       "./dist/index.js"
     ],
     "compat": {
-      "pluginApi": ">=2026.5.17"
+      "pluginApi": ">=2026.9.5",
+      "minGatewayVersion": "2026.9.5"
     },
     "build": {
-      "openclawVersion": "2026.9.5"
+      "openclawVersion": "2026.9.5",
+      "pluginSdkVersion": "2026.9.5"
     }
   }
 }

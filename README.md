@@ -37,7 +37,7 @@ After posting or updating, those four tools and `slack_blocks_send`/`slack_block
 
 `slack_message_delete` wraps `chat.delete` so the agent can clean up its own scratch or obsolete cards. Before deleting, it reads the message back with `conversations.history`, or `conversations.replies` when you pass the thread parent's `threadTs`, and compares its author with the bot's `auth.test` identity. If another user or app posted the message, or the message can't be found, the tool refuses the call and never reaches `chat.delete`. Deleting is irreversible, so every call also waits for a human's approval.
 
-`slack_work_object_post` posts a [Work Object](https://docs.slack.dev/messaging/work-objects-overview) card for an item that lives in another system, like an issue, incident, or doc. It calls `chat.postMessage` with entity metadata and no `app_unfurl_url`, because it's a proactive post rather than a reply to a link unfurl. The card shows `title`, `displayId`, `displayType`, `status`, and a link to `url`. `entityType` picks Slack's entity schema: `task` (the default), `incident`, `file`, or `content_item`. Only `task` and `incident` have a status field, so the tool refuses a `status` on the others before calling Slack. Clicking the card opens only a static placeholder. Filling in the details pane means handling Slack's `entity_details_requested` event, and only the bundled channel plugin receives events. Slack renders Work Objects only after someone turns on **Work Object Previews** in the app's settings (roadmap O-13). If Slack rejects the entity metadata, the tool posts an equivalent plain Block Kit card, with a linked title and a context line, and returns `mode: "fallback"` with Slack's error as `reason`. Errors that a plain post would hit too, like `channel_not_found` or `missing_scope`, are thrown as usual. The result is `{ mode, channelId, ts, permalink?, reason? }`.
+`slack_work_object_post` posts a [Work Object](https://docs.slack.dev/messaging/work-objects-overview) card for an item that lives in another system, like an issue, incident, or doc. It calls `chat.postMessage` with entity metadata and no `app_unfurl_url`, because it's a proactive post rather than a reply to a link unfurl. The card shows `title`, `displayId`, `displayType`, `status`, and a link to `url`. `entityType` picks Slack's entity schema: `task` (the default), `incident`, `file`, or `content_item`. Only `task` and `incident` have a status field, so the tool refuses a `status` on the others before calling Slack. Clicking the card opens only a static placeholder. Filling in the details pane means handling Slack's `entity_details_requested` event, and only the bundled channel plugin receives events. Slack renders Work Objects only after someone turns on **Work Object Previews** in the app's settings. If Slack rejects the entity metadata, the tool posts an equivalent plain Block Kit card, with a linked title and a context line, and returns `mode: "fallback"` with Slack's error as `reason`. Errors that a plain post would hit too, like `channel_not_found` or `missing_scope`, are thrown as usual. The result is `{ mode, channelId, ts, permalink?, reason? }`.
 
 ### Scheduling and reminders
 
@@ -132,6 +132,29 @@ After posting or updating, those four tools and `slack_blocks_send`/`slack_block
 
 Tools that read a channel's history (`slack_message_get`, `slack_message_delete`, `slack_canvas_from_thread`, `slack_list_from_thread`) need the history scope for the conversation's type: `channels:history` for public channels, `groups:history` for private ones, and `im:history` or `mpim:history` for DMs and group DMs.
 
+## Install
+
+You need OpenClaw 2026.9.5 or later, with the bundled Slack channel plugin already connected to a Slack app. This plugin uses the same app and the same bot token, so anything it posts comes from the bot people already talk to.
+
+1. Install the plugin from ClawHub:
+
+   ```bash
+   openclaw plugins install clawhub:@stevekinney/openclaw-slack-workspace
+   ```
+
+2. In your Slack app's settings (api.slack.com/apps), add the scopes listed under [Slack scopes](#slack-scopes), then reinstall the app to your workspace. For `slack_search` and `slack_search_context`, also add the user-token scopes and copy the app's `xoxp-` user token.
+3. Point the plugin at your tokens, as shown under [Configuration](#configuration), then reload it:
+
+   ```bash
+   openclaw plugins reload slack-workspace
+   ```
+
+4. Confirm that the tokens hold every scope the tools need:
+
+   ```bash
+   openclaw slack-workspace doctor
+   ```
+
 ## Configuration
 
 Configure the plugin under `plugins.entries.slack-workspace.config` in your OpenClaw config:
@@ -174,7 +197,7 @@ The Slack app needs these scopes, split by token:
 
 **User token (`xoxp-`):** `search:read`, `search:read.public`. Add `search:read.private`, `search:read.im`, `search:read.mpim`, `search:read.files` and `search:read.users` to let `slack_search_context` cover private channels, DMs, files and people.
 
-The `groups:write*` scopes let the channel lifecycle tools act on private channels. Without them, those tools still work on public channels, and a private-channel call fails with an error naming the missing scope. `channels:join` is still pending on the Slack app (roadmap O-12), so joins fail until it's granted.
+The `groups:write*` scopes let the channel lifecycle tools act on private channels. Without them, those tools still work on public channels, and a private-channel call fails with an error naming the missing scope. Without `channels:join`, auto-join and `slack_channel_join` fail with an error naming the scope.
 
 The source of truth is `TOOL_SCOPES` in `src/doctor.ts`. Run `openclaw slack-workspace doctor` after changing the Slack app to confirm the reinstall picked up every scope.
 
@@ -220,7 +243,7 @@ When the call fails with `missing_scope`, `not_allowed_token_type`, `unknown_met
 
 Most tools don't need an explicit join. When a bot-token call fails with `not_in_channel`, the client looks the channel up with `conversations.info`, joins it with `conversations.join` if it's public, and retries the original call once. The tool's result then carries `autoJoined: true`, so the agent knows it's now a member. The client never joins private channels, DMs, or group DMs; those fail with an error asking for an `/invite @OpenClaw`. Archived channels fail with an error that says so. A failed join or a failed retry is never retried again. Set `autoJoin: false` in the plugin config to turn this off, or list channel IDs in `autoJoinDeny` to keep the bot out of specific channels.
 
-`conversations.join` needs the `channels:join` bot scope, which the Slack app doesn't have until roadmap task O-12 adds it. Until then, a join fails with an error naming the scope. Keep in mind what membership does on the host side: with the channel plugin's `groupPolicy: "open"`, every channel the bot joins becomes one where the agent answers @-mentions, and the channel plugin posts an introduction on join unless `channels.slack.joinIntro` is `false`.
+`conversations.join` needs the `channels:join` bot scope. If your Slack app doesn't have it, a join fails with an error naming the scope. Keep in mind what membership does on the host side: with the channel plugin's `groupPolicy: "open"`, every channel the bot joins becomes one where the agent answers @-mentions, and the channel plugin posts an introduction on join unless `channels.slack.joinIntro` is `false`.
 
 ## Lists
 
@@ -274,15 +297,15 @@ Slack deprecates `assistant_view` in February 2027 (see [Migrating to agent mess
 
 ## Workflow triggers
 
-`slack_workflow_trigger_run` starts a Workflow Builder workflow from a conversation. Slack has no Web API method that starts a Workflow Builder workflow from a bot token (see roadmap W-01), so the tool uses a webhook trigger instead. Create one in Workflow Builder, which gives you a stable `https://hooks.slack.com/triggers/...` URL, and add it under a name in the plugin config's `workflowTriggers` map. Each entry is a string or a SecretRef, and each one is declared in `configContracts.secretInputs` (`workflowTriggers.*`). The URL is the credential: anyone holding it can start the workflow, so treat it like a token. The tool takes `name` and an optional `payload` object, whose keys are the trigger's variables as defined in Workflow Builder. It POSTs `payload` as JSON, without a Slack token, so it needs no OAuth scope. An unknown name fails before any request and lists the configured names. The result is `{ name, status, response }`, where `response` is Slack's body, parsed as JSON when it is JSON. A non-2xx status fails with the status and the start of the body. Neither the error nor the log line ever includes the URL.
+`slack_workflow_trigger_run` starts a Workflow Builder workflow from a conversation. Slack has no Web API method that starts a Workflow Builder workflow from a bot token, so the tool uses a webhook trigger instead. Create one in Workflow Builder, which gives you a stable `https://hooks.slack.com/triggers/...` URL, and add it under a name in the plugin config's `workflowTriggers` map. Each entry is a string or a SecretRef, and each one is declared in `configContracts.secretInputs` (`workflowTriggers.*`). The URL is the credential: anyone holding it can start the workflow, so treat it like a token. The tool takes `name` and an optional `payload` object, whose keys are the trigger's variables as defined in Workflow Builder. It POSTs `payload` as JSON, without a Slack token, so it needs no OAuth scope. An unknown name fails before any request and lists the configured names. The result is `{ name, status, response }`, where `response` is Slack's body, parsed as JSON when it is JSON. A non-2xx status fails with the status and the start of the body. Neither the error nor the log line ever includes the URL.
 
 ## Workflow Builder → OpenClaw bridge
 
-[`docs/workflow-builder-gateway-bridge.md`](docs/workflow-builder-gateway-bridge.md) covers the opposite direction: a Workflow Builder workflow that hands a prompt to an OpenClaw agent through the Gateway's `POST /hooks/agent` endpoint. OpenClaw posts the agent's reply straight to a Slack channel. It needs no plugin code and no new scopes, but it does need `hooks.enabled`, a public Gateway origin (roadmap O-06), and a small custom-step Slack app, because Workflow Builder has no built-in outbound HTTP step. The recipe hasn't been run live yet; roadmap H-03 tracks that.
+[`docs/workflow-builder-gateway-bridge.md`](https://github.com/stevekinney/openclaw-plugin-slack-workspace/blob/main/docs/workflow-builder-gateway-bridge.md) covers the opposite direction: a Workflow Builder workflow that hands a prompt to an OpenClaw agent through the Gateway's `POST /hooks/agent` endpoint. OpenClaw posts the agent's reply straight to a Slack channel. It needs no plugin code and no new scopes, but it does need `hooks.enabled`, a public Gateway origin (`gateway.publicOrigin`), and a small custom-step Slack app, because Workflow Builder has no built-in outbound HTTP step. The recipe hasn't been run live yet; roadmap H-03 tracks that.
 
 ## Inbound webhooks
 
-[`docs/inbound-webhooks.md`](docs/inbound-webhooks.md) maps the ways an external system can reach OpenClaw or Slack to when to use each. The options are OpenClaw's Gateway hooks (`/hooks/wake`, `/hooks/agent` with direct Slack delivery, and mapped `/hooks/<name>`), the bundled Webhooks plugin for TaskFlow state (which never starts an agent), and Slack's own `incoming-webhook` URL (which bypasses OpenClaw entirely). None of them needs code in this plugin, which is why it doesn't run an HTTP listener of its own.
+[`docs/inbound-webhooks.md`](https://github.com/stevekinney/openclaw-plugin-slack-workspace/blob/main/docs/inbound-webhooks.md) maps the ways an external system can reach OpenClaw or Slack to when to use each. The options are OpenClaw's Gateway hooks (`/hooks/wake`, `/hooks/agent` with direct Slack delivery, and mapped `/hooks/<name>`), the bundled Webhooks plugin for TaskFlow state (which never starts an agent), and Slack's own `incoming-webhook` URL (which bypasses OpenClaw entirely). None of them needs code in this plugin, which is why it doesn't run an HTTP listener of its own.
 
 ## Scope doctor
 
@@ -294,11 +317,11 @@ To turn a recurring automation's N messages into one card that gets edited each 
 
 ## Not built on purpose
 
-These gaps are deliberate decisions, not oversights. Read the matching entry under "Explicitly out of scope" in `ROADMAP.md` before proposing any of them again.
+These gaps are deliberate decisions, not oversights. The reasoning for each lives under "Explicitly out of scope" in [`ROADMAP.md`](https://github.com/stevekinney/openclaw-plugin-slack-workspace/blob/main/ROADMAP.md); read it before proposing any of them.
 
 - **Legacy message `attachments`.** Slack deprecated them in favor of Block Kit for new development. No tool takes an `attachments` parameter, and none should.
 - **Anything the bundled Slack channel plugin already owns.** That covers pins, reactions, the emoji list, member info, in-turn file upload and download, opening a conversation for ordinary chat, assistant thread and agent session status (`assistant.threads.setStatus`, `agents.sessions.setStatus`), and App Home (`views.publish`). A second `views.publish` would race the channel plugin's own Home view.
-- **Per-message personas (`chat:write.customize`) and dedicated `chat:write.public` or `users:write` features.** The owner dropped them.
+- **Per-message personas (`chat:write.customize`) and dedicated `chat:write.public` or `users:write` features.** They're out of scope for this plugin.
 - **Link unfurling and Work Objects (`chat.unfurl`).** They need a `link_shared` event that this app doesn't subscribe to, relayed from the channel plugin's Socket Mode connection, plus a registered unfurl domain. None of those exist.
 - **Workflow Steps.** Slack retired legacy steps from apps (`workflow.steps:execute`) in September 2024. Modern custom steps (`functions.completeSuccess`) need Socket Mode handlers, and the channel plugin owns this app's only connection.
 - **A modal tool (`views.open`).** It needs a 3-second `trigger_id` from a live interaction. The channel plugin redacts that ID from agent context.
@@ -334,3 +357,22 @@ npm run ci
 ```
 
 If the metadata check fails, run `npm run plugin:build` and commit the updated manifest.
+
+### Release
+
+`dist/` isn't committed, so publish from a local build rather than straight from the GitHub repo. `npm pack` runs the build first through `prepack`.
+
+```bash
+npm run ci
+npm pack --pack-destination /tmp
+openclaw plugins install npm-pack:/tmp/stevekinney-openclaw-slack-workspace-<version>.tgz --force
+openclaw plugins inspect slack-workspace --runtime --json
+clawhub package publish . --dry-run
+clawhub package publish .
+```
+
+The `npm-pack:` install proves the published package's shape and dependencies. It installs into your real OpenClaw state, so do it on a machine where that's fine. Tag the release (`git tag v<version>`) once it's published.
+
+## License
+
+MIT. See [`LICENSE`](LICENSE).
