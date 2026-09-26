@@ -362,7 +362,7 @@ If the metadata check fails, run `npm run plugin:build` and commit the updated m
 
 `dist/` isn't committed, so publish from a local build rather than straight from the GitHub repo. `npm run ci` builds `dist/` before `clawhub package publish .` reads the folder, and `npm pack` rebuilds it through `prepack`.
 
-First set the new version in both `package.json` and `openclaw.plugin.json` (a test fails if they differ) and commit it. Then:
+Release from `main`. First set the new version in both `package.json` and `openclaw.plugin.json` (a test fails if they differ), then commit and push it. Then:
 
 ```bash
 npm run ci
