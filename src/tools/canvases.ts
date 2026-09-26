@@ -971,7 +971,6 @@ export const canvasTools = (tool: ToolFactory) => [
 ];
 
 /** `replace` overwrites and `delete` removes canvas content; Slack offers no API to restore it. */
-/** "channels C1, C2" or "users U1" for an access change's prompt. */
 export const canvasApprovals: ApprovalRule[] = [
   {
     toolName: "slack_canvas_access_set",
