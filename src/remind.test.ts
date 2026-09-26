@@ -42,6 +42,15 @@ describe("slack_remind", () => {
         channel: "D0DM",
         text: "Submit the expense report",
         post_at: postAt,
+        metadata: {
+          event_type: "notification",
+          event_payload: {
+            notification_type: "info",
+            title: "Submit the expense report",
+            urgency: "normal",
+            category: "reminder",
+          },
+        },
       });
       expect(result).toEqual({
         channelId: "D0DM",
@@ -61,10 +70,59 @@ describe("slack_remind", () => {
         when: nowSeconds + 60,
       });
       expect(calls.map((call) => call.method)).toEqual(["chat.scheduleMessage"]);
-      expect(calls[0].body).toEqual({ channel: "C0TEAM", text: "Standup in 5", post_at: nowSeconds + 60 });
+      expect(calls[0].body).toMatchObject({ channel: "C0TEAM", text: "Standup in 5", post_at: nowSeconds + 60 });
+      expect(calls[0].body.metadata).toMatchObject({ event_type: "notification" });
       expect(result).toMatchObject({ channelId: "C0TEAM", scheduledMessageId: "Q0TEST" });
       expect(result).not.toHaveProperty("userId");
     });
+  });
+
+  it("titles the notification with the first line, capped in length", async () => {
+    await withMockFetch(slack, async (calls) => {
+      await runTool("slack_remind", {
+        channelId: "C0TEAM",
+        text: `${"a".repeat(200)}\nsecond line`,
+        when: nowSeconds + 60,
+      });
+      const title = (calls[0].body.metadata as { event_payload: { title: string } }).event_payload.title;
+      expect(title).toBe(`${"a".repeat(149)}…`);
+    });
+  });
+
+  it("falls back to a plain reminder when Slack rejects the metadata", async () => {
+    await withMockFetch(
+      (call) =>
+        call.method === "chat.scheduleMessage" && call.body.metadata
+          ? { ok: false, error: "invalid_metadata_schema" }
+          : slack(call),
+      async (calls) => {
+        const result = await runTool("slack_remind", {
+          channelId: "C0TEAM",
+          text: "Standup in 5",
+          when: nowSeconds + 60,
+        });
+        expect(calls.map((call) => call.method)).toEqual([
+          "chat.scheduleMessage",
+          "chat.scheduleMessage",
+        ]);
+        expect(calls[1].body).toEqual({ channel: "C0TEAM", text: "Standup in 5", post_at: nowSeconds + 60 });
+        expect(result).toMatchObject({ channelId: "C0TEAM", scheduledMessageId: "Q0TEST" });
+        expect((result as { note?: string }).note).toMatch(/invalid_metadata_schema/);
+      },
+    );
+  });
+
+  it("does not retry without metadata on unrelated errors", async () => {
+    await withMockFetch(
+      (call) =>
+        call.method === "chat.scheduleMessage" ? { ok: false, error: "channel_not_found" } : slack(call),
+      async (calls) => {
+        await expect(
+          runTool("slack_remind", { channelId: "C0GONE", text: "x", when: nowSeconds + 60 }),
+        ).rejects.toThrow(/channel_not_found/);
+        expect(calls.map((call) => call.method)).toEqual(["chat.scheduleMessage"]);
+      },
+    );
   });
 
   it("refuses both or neither target before calling Slack", async () => {

@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { callSlack, resolveToken, type SlackCallContext } from "../client.js";
+import { callSlack, resolveToken, SlackApiError, type SlackCallContext } from "../client.js";
 import type { ApprovalRule } from "../approvals.js";
 import { cursorParams, toPage, walkPages } from "../pagination.js";
 import { blocksSchema, channelIdParam, threadTsParam, type ToolFactory } from "../schemas.js";
@@ -80,6 +80,24 @@ const deleteScheduledMessage = (
     { channel: channelId, scheduled_message_id: scheduledMessageId },
     context,
   );
+
+/**
+ * Slack's standard notification metadata (docs.slack.dev/messaging/message-metadata),
+ * so Slack can surface the reminder in the Activity feed. A message carries one event
+ * type, so reminders use this instead of `openclaw_card`.
+ */
+const reminderMetadata = (text: string) => {
+  const firstLine = text.trim().split("\n")[0] ?? "";
+  const title = firstLine.length > 150 ? `${firstLine.slice(0, 149)}…` : firstLine;
+  return {
+    event_type: "notification",
+    event_payload: { notification_type: "info", title, urgency: "normal", category: "reminder" },
+  };
+};
+
+/** Slack error codes that mean the metadata, not the message, was refused. */
+const isMetadataRejection = (error: unknown) =>
+  error instanceof SlackApiError && /metadata/.test(error.code);
 
 const postAtDescription =
   'an ISO-8601 datetime with an explicit offset ("2026-09-23T09:00:00-06:00" or "…Z") or Unix seconds (number or all-digit string). Datetimes without an offset are rejected as ambiguous. Must be in the future and within 120 days.';
@@ -204,7 +222,7 @@ export const schedulingTools = (tool: ToolFactory) => [
     name: "slack_remind",
     label: "Remind in Slack",
     description:
-      "Remind someone of something at a future time, up to 120 days out: give a `userId` to DM them, or a `channelId` to post in a channel. Use this instead of Slack reminders, whose API Slack began retiring in 2023 and now calls degraded or useless. The reminder is a scheduled message, so slack_scheduled_list shows it and slack_scheduled_cancel cancels it. It fires once; for a recurring reminder, set up an `openclaw automations` job that calls this tool instead of scheduling repeats by hand.",
+      "Remind someone of something at a future time, up to 120 days out: give a `userId` to DM them, or a `channelId` to post in a channel. Use this instead of Slack reminders, whose API Slack began retiring in 2023 and now calls degraded or useless. The reminder is a scheduled message, so slack_scheduled_list shows it and slack_scheduled_cancel cancels it. It carries Slack's standard notification metadata so Slack can surface it in the Activity feed; if Slack rejects that metadata, the reminder is scheduled without it and the result's `note` says so. It fires once; for a recurring reminder, set up an `openclaw automations` job that calls this tool instead of scheduling repeats by hand.",
     parameters: Type.Object({
       userId: Type.Optional(
         Type.String({
@@ -226,6 +244,7 @@ export const schedulingTools = (tool: ToolFactory) => [
         scheduledMessageId: Type.String(),
         postAt: Type.Number(),
         postAtIso: Type.String(),
+        note: Type.Optional(Type.String()),
       },
       { additionalProperties: false },
     ),
@@ -249,18 +268,29 @@ export const schedulingTools = (tool: ToolFactory) => [
         target = channel.id;
       }
 
-      const data = await callSlack(
-        "chat.scheduleMessage",
-        token,
-        { channel: target, text, post_at: seconds },
-        context,
-      );
+      const body = { channel: target, text, post_at: seconds };
+      let data: Record<string, unknown>;
+      let note: string | undefined;
+      try {
+        data = await callSlack(
+          "chat.scheduleMessage",
+          token,
+          { ...body, metadata: reminderMetadata(text) },
+          context,
+        );
+      } catch (error) {
+        if (!isMetadataRejection(error)) throw error;
+        // The reminder matters more than the Activity-feed metadata: retry without it.
+        data = await callSlack("chat.scheduleMessage", token, body, context);
+        note = `Slack rejected the notification metadata (${(error as SlackApiError).code}), so the reminder was scheduled without it and may not appear in the Activity feed.`;
+      }
       return {
         channelId: String(data.channel ?? target),
         ...(userId ? { userId } : {}),
         scheduledMessageId: String(data.scheduled_message_id ?? ""),
         postAt: seconds,
         postAtIso: new Date(seconds * 1000).toISOString(),
+        ...(note ? { note } : {}),
       };
     },
   }),

@@ -1070,7 +1070,7 @@ fall back to the previous behavior, and say so in the tool result, with a
   - Tests: mocked success; mocked rejection → fallback.
   - Size: M
 
-- [ ] **R-03: Stamp slack_remind with Slack's standard notification metadata** — Scheduled reminders carry `metadata: { event_type: "notification", event_payload: { notification_type: "info", title, urgency, category: "reminder" } }` (docs.slack.dev/messaging/message-metadata), so Slack can surface them in the Activity feed. Other cards keep `openclaw_card`; a message has only one event type.
+- [x] **R-03: Stamp slack_remind with Slack's standard notification metadata** — Scheduled reminders carry `metadata: { event_type: "notification", event_payload: { notification_type: "info", title, urgency, category: "reminder" } }` (docs.slack.dev/messaging/message-metadata), so Slack can surface them in the Activity feed. Other cards keep `openclaw_card`; a message has only one event type.
   - Why: Reminders are exactly the kind of message that gets lost. This uses Slack's own surfacing mechanism.
   - Scope(s) & token type: bot token, `chat:write` (existing).
   - API methods: `chat.scheduleMessage` `metadata`.
