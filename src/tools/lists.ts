@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { callSlack, resolveToken, type PluginConfig, type SlackCallContext } from "../client.js";
+import { callSlack, resolveToken, sleep, type PluginConfig, type SlackCallContext } from "../client.js";
 import {
   accessLevelParam,
   accessTarget,
@@ -16,6 +16,15 @@ import type { ApprovalRule } from "../approvals.js";
 import { cursorParams, toPage, walkPages } from "../pagination.js";
 import { channelIdParam, type ToolFactory } from "../schemas.js";
 import { fetchThread, type ThreadMessage } from "./canvases.js";
+
+/**
+ * `slack_list_export` polls `slackLists.download.get` at most this often and this many
+ * times, and stops once the next poll would land past the timeout, so one tool call
+ * never waits much more than half a minute. A slower export is resumed by `jobId`.
+ */
+const EXPORT_POLL_INTERVAL_MS = 2_000;
+const EXPORT_MAX_POLLS = 10;
+const EXPORT_TIMEOUT_MS = 30_000;
 
 /** Column types `slackLists.create` accepts in a `schema`. */
 const COLUMN_TYPES = [
@@ -563,6 +572,86 @@ export const listTools = (tool: ToolFactory) => [
       if (updated.length === 0) throw new Error("Set name, description, or todoMode to change.");
       await callSlack("slackLists.update", resolveToken(config), body, context);
       return { listId, updated };
+    },
+  }),
+  tool({
+    name: "slack_list_export",
+    label: "Export Slack list",
+    description:
+      "Export a Slack List as a CSV (default) or JSON file and return its download URL. Slack builds the file asynchronously; the tool polls for up to about 30 seconds. If `ready` is false, call again with the returned `jobId` to keep waiting instead of starting a new export.",
+    parameters: Type.Object({
+      listId: Type.String({ description: "List ID, e.g. F0123ABCD." }),
+      format: Type.Optional(
+        Type.Union([Type.Literal("csv"), Type.Literal("json")], { description: "File format. Default csv." }),
+      ),
+      includeArchived: Type.Optional(Type.Boolean({ description: "Include archived items." })),
+      includeThreads: Type.Optional(
+        Type.Boolean({ description: "Include each item's comment thread. JSON only." }),
+      ),
+      includeAttachments: Type.Optional(
+        Type.Boolean({ description: "Include file attachment metadata. JSON only." }),
+      ),
+      jobId: Type.Optional(
+        Type.String({
+          description:
+            "Resume waiting on an export a previous call started (its `jobId`). Pass the same format and JSON options.",
+        }),
+      ),
+    }),
+    outputSchema: Type.Object(
+      {
+        listId: Type.String(),
+        jobId: Type.String(),
+        format: Type.Union([Type.Literal("csv"), Type.Literal("json")]),
+        status: Type.String(),
+        ready: Type.Boolean(),
+        downloadUrl: Type.Optional(Type.String()),
+      },
+      { additionalProperties: false },
+    ),
+    async execute(
+      { listId, format = "csv", includeArchived, includeThreads, includeAttachments, jobId },
+      config,
+      context,
+    ) {
+      context.signal?.throwIfAborted();
+      if (format !== "json" && (includeThreads !== undefined || includeAttachments !== undefined)) {
+        throw new Error('includeThreads and includeAttachments need format: "json".');
+      }
+      const token = resolveToken(config);
+      // `download.get` must repeat the JSON options `download.start` was given.
+      const jsonOptions: Record<string, unknown> = {};
+      if (includeThreads !== undefined) jsonOptions.include_threads = includeThreads;
+      if (includeAttachments !== undefined) jsonOptions.include_attachments = includeAttachments;
+
+      let job = jobId;
+      if (!job) {
+        const start: Record<string, unknown> = { list_id: listId, format };
+        if (includeArchived !== undefined) start.include_archived = includeArchived;
+        const started = await callSlack("slackLists.download.start", token, { ...start, ...jsonOptions }, context);
+        job = String(started.job_id);
+      }
+
+      const deadline = Date.now() + EXPORT_TIMEOUT_MS;
+      let status = "IN_PROGRESS";
+      for (let attempt = 1; attempt <= EXPORT_MAX_POLLS; attempt += 1) {
+        const data = await callSlack(
+          "slackLists.download.get",
+          token,
+          { list_id: listId, job_id: job, format, ...jsonOptions },
+          context,
+        );
+        status = typeof data.status === "string" ? data.status : status;
+        if (typeof data.download_url === "string" && data.download_url) {
+          return { listId, jobId: job, format, status, ready: true, downloadUrl: data.download_url };
+        }
+        if (/FAIL|ERROR|CANCEL/i.test(status)) {
+          throw new Error(`List export job ${job} ended with status ${status}.`);
+        }
+        if (attempt === EXPORT_MAX_POLLS || Date.now() + EXPORT_POLL_INTERVAL_MS >= deadline) break;
+        await sleep(EXPORT_POLL_INTERVAL_MS, context.signal);
+      }
+      return { listId, jobId: job, format, status, ready: false };
     },
   }),
   tool({
