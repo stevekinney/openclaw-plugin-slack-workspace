@@ -21,6 +21,12 @@ describe("package.json", () => {
     const pkg = await readJson(join(ROOT, "package.json"));
     expect(pkg.files).toContain("assets");
   });
+
+  it("matches the manifest version", async () => {
+    const pkg = await readJson(join(ROOT, "package.json"));
+    const manifest = await readJson(join(ROOT, "openclaw.plugin.json"));
+    expect(manifest.version).toBe(pkg.version);
+  });
 });
 
 // OpenClaw discovers artwork at fixed paths; no manifest field points at it.

@@ -301,7 +301,7 @@ Slack deprecates `assistant_view` in February 2027 (see [Migrating to agent mess
 
 ## Workflow Builder → OpenClaw bridge
 
-[`docs/workflow-builder-gateway-bridge.md`](https://github.com/stevekinney/openclaw-plugin-slack-workspace/blob/main/docs/workflow-builder-gateway-bridge.md) covers the opposite direction: a Workflow Builder workflow that hands a prompt to an OpenClaw agent through the Gateway's `POST /hooks/agent` endpoint. OpenClaw posts the agent's reply straight to a Slack channel. It needs no plugin code and no new scopes, but it does need `hooks.enabled`, a public Gateway origin (`gateway.publicOrigin`), and a small custom-step Slack app, because Workflow Builder has no built-in outbound HTTP step. The recipe hasn't been run live yet; roadmap H-03 tracks that.
+[`docs/workflow-builder-gateway-bridge.md`](https://github.com/stevekinney/openclaw-plugin-slack-workspace/blob/main/docs/workflow-builder-gateway-bridge.md) covers the opposite direction: a Workflow Builder workflow that hands a prompt to an OpenClaw agent through the Gateway's `POST /hooks/agent` endpoint. OpenClaw posts the agent's reply straight to a Slack channel. It needs no plugin code and no new scopes, but it does need `hooks.enabled`, a public Gateway origin (`gateway.publicOrigin`), and a small custom-step Slack app, because Workflow Builder has no built-in outbound HTTP step. The recipe hasn't been run live yet.
 
 ## Inbound webhooks
 
@@ -360,7 +360,9 @@ If the metadata check fails, run `npm run plugin:build` and commit the updated m
 
 ### Release
 
-`dist/` isn't committed, so publish from a local build rather than straight from the GitHub repo. `npm pack` runs the build first through `prepack`.
+`dist/` isn't committed, so publish from a local build rather than straight from the GitHub repo. `npm run ci` builds `dist/` before `clawhub package publish .` reads the folder, and `npm pack` rebuilds it through `prepack`.
+
+First set the new version in both `package.json` and `openclaw.plugin.json` (a test fails if they differ) and commit it. Then:
 
 ```bash
 npm run ci
@@ -371,9 +373,9 @@ clawhub package publish . --dry-run
 clawhub package publish .
 ```
 
-The `npm-pack:` install proves the published package's shape and dependencies. It installs into your real OpenClaw state, so do it on a machine where that's fine. Tag the release (`git tag v<version>`) once it's published.
+The `npm-pack:` install proves the published package's shape and dependencies. It installs into your real OpenClaw state, so do it on a machine where that's fine. After `clawhub package publish .` succeeds, tag the release and push the tag: `git tag v<version> && git push origin v<version>`.
 
-If the repo-local `openclaw` CLI refuses to open your state database because a newer Gateway upgraded its schema, run `npm run ci` with a throwaway state directory: `OPENCLAW_STATE_DIR=$(mktemp -d) npm run ci`. The build, check, and validate steps don't need your real state.
+If the repo-local `openclaw` CLI refuses to open your state database because a newer Gateway upgraded its schema, run it with a throwaway state directory: `OPENCLAW_STATE_DIR=$(mktemp -d) npm run ci`. The same prefix works for `npm test` and `npm run plugin:validate`, which also call the CLI. None of these steps need your real state.
 
 ## License
 
