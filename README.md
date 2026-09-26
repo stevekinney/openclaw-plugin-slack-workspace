@@ -31,6 +31,8 @@ Tools marked † take an optional `channelId`. Inside a Slack conversation, leav
 
 `slack_post_table`, `slack_post_plan`, `slack_post_chart`, and `slack_post_rich_text` also take `updateTs` to rewrite a message they posted earlier.
 
+After posting or updating, those four tools and `slack_blocks_send`/`slack_blocks_update` call `chat.getPermalink` and return the message's `permalink`, so the agent can link to what it posted. If the lookup fails, the post still succeeds: the result just omits `permalink` and a warning is logged.
+
 ### Scheduling and reminders
 
 | Tool | What it does | Token | Scopes |

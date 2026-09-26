@@ -16,7 +16,7 @@ const tool = () => {
 async function compile(sections: Record<string, unknown>[]) {
   return withMockFetch(ok, async (calls) => {
     await runTool("slack_post_rich_text", { channelId: "C0TEST", sections });
-    expect(calls).toHaveLength(1);
+    expect(calls.map((call) => call.method)).toEqual(["chat.postMessage", "chat.getPermalink"]);
     expect(calls[0].method).toBe("chat.postMessage");
     const blocks = calls[0].body.blocks as unknown[];
     expect(blocks).toHaveLength(1);
@@ -118,7 +118,7 @@ describe("slack_post_rich_text", () => {
       await runTool("slack_post_rich_text", { channelId: "C0TEST", sections });
       expect(calls[0].body.text).toBe("Status &lt;!here&gt;\n• a\n1. b\n2. c\n> q\n```x```");
       await runTool("slack_post_rich_text", { channelId: "C0TEST", sections, text: "Status" });
-      expect(calls[1].body.text).toBe("Status");
+      expect(calls[2].body.text).toBe("Status");
     });
   });
 

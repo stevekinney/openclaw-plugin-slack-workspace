@@ -7,6 +7,7 @@ import {
   activeChannelIdParam,
   blocksSchema,
   metadataParam,
+  permalinkField,
   postResultSchema,
   replyBroadcastParam,
   targetParams,
@@ -185,6 +186,32 @@ const stampedMessageSchema = Type.Object(
   { additionalProperties: false },
 );
 
+/**
+ * Add the message's permalink to a post result. The post already succeeded, so a failed
+ * lookup only logs a warning and returns the result without `permalink`.
+ */
+async function withPermalink<T extends { channelId: string; ts: string }>(
+  result: T,
+  token: string,
+  context?: SlackCallContext,
+): Promise<T & { permalink?: string }> {
+  if (!result.ts) return result;
+  try {
+    const data = await callSlack(
+      "chat.getPermalink",
+      token,
+      { channel: result.channelId, message_ts: result.ts },
+      context,
+    );
+    return typeof data.permalink === "string" ? { ...result, permalink: data.permalink } : result;
+  } catch (error) {
+    context?.signal?.throwIfAborted();
+    const reason = error instanceof Error ? error.message : String(error);
+    context?.api?.logger?.warn(`slack-workspace: chat.getPermalink failed; returning the post without a permalink: ${reason}`);
+    return result;
+  }
+}
+
 async function postOrUpdate(
   config: PluginConfig,
   args: {
@@ -199,7 +226,7 @@ async function postOrUpdate(
     metadata?: { eventType: string; eventPayload: Record<string, unknown> };
   },
   context?: SlackCallContext,
-): Promise<{ channelId: string; ts: string; updated: boolean }> {
+): Promise<{ channelId: string; ts: string; updated: boolean; permalink?: string }> {
   const token = resolveToken(config, "bot");
   const body: Record<string, unknown> = {
     channel: args.channelId,
@@ -210,11 +237,15 @@ async function postOrUpdate(
   if (args.updateTs) {
     body.ts = args.updateTs;
     const data = await callSlack("chat.update", token, body, context);
-    return {
-      channelId: String(data.channel ?? args.channelId),
-      ts: String(data.ts ?? args.updateTs),
-      updated: true,
-    };
+    return withPermalink(
+      {
+        channelId: String(data.channel ?? args.channelId),
+        ts: String(data.ts ?? args.updateTs),
+        updated: true,
+      },
+      token,
+      context,
+    );
   }
   if (args.threadTs) body.thread_ts = args.threadTs;
   if (args.threadTs && args.replyBroadcast) body.reply_broadcast = true;
@@ -222,7 +253,11 @@ async function postOrUpdate(
   body.unfurl_media = args.unfurlMedia ?? false;
   const data = await callSlack("chat.postMessage", token, body, context);
   // A user ID opens a DM; Slack returns the resolved D… channel, which follow-up calls need.
-  return { channelId: String(data.channel ?? args.channelId), ts: String(data.ts ?? ""), updated: false };
+  return withPermalink(
+    { channelId: String(data.channel ?? args.channelId), ts: String(data.ts ?? ""), updated: false },
+    token,
+    context,
+  );
 }
 
 export const messagingTools = (tool: ToolFactory) => [
@@ -561,7 +596,7 @@ export const messagingTools = (tool: ToolFactory) => [
       metadata: metadataParam,
     }),
     outputSchema: Type.Object(
-      { channelId: Type.String(), ts: Type.String(), blockCount: Type.Number() },
+      { channelId: Type.String(), ts: Type.String(), blockCount: Type.Number(), permalink: permalinkField },
       { additionalProperties: false },
     ),
     async execute(
@@ -581,13 +616,14 @@ export const messagingTools = (tool: ToolFactory) => [
       if (threadTs) body.thread_ts = threadTs;
       if (threadTs && replyBroadcast) body.reply_broadcast = true;
       if (metadata) body.metadata = toSlackMetadata(metadata);
-      const data = await callSlack(
-        "chat.postMessage",
-        resolveToken(config, "bot"),
-        body,
+      const token = resolveToken(config, "bot");
+      const data = await callSlack("chat.postMessage", token, body, context);
+      const { permalink } = await withPermalink(
+        { channelId: String(data.channel ?? channelId), ts: String(data.ts ?? "") },
+        token,
         context,
       );
-      return { channelId, ts: String(data.ts ?? ""), blockCount: blocks.length };
+      return { channelId, ts: String(data.ts ?? ""), blockCount: blocks.length, ...(permalink && { permalink }) };
     },
   }),
 
@@ -604,7 +640,7 @@ export const messagingTools = (tool: ToolFactory) => [
       metadata: metadataParam,
     }),
     outputSchema: Type.Object(
-      { channelId: Type.String(), ts: Type.String(), blockCount: Type.Number() },
+      { channelId: Type.String(), ts: Type.String(), blockCount: Type.Number(), permalink: permalinkField },
       { additionalProperties: false },
     ),
     async execute({ channelId: explicitChannelId, ts, text, blocks, metadata }, config, context) {
@@ -612,8 +648,9 @@ export const messagingTools = (tool: ToolFactory) => [
       const channelId = resolveChannelId(explicitChannelId, context);
       const body: Record<string, unknown> = { channel: channelId, ts, text, blocks };
       if (metadata) body.metadata = toSlackMetadata(metadata);
-      const data = await callSlack("chat.update", resolveToken(config, "bot"), body, context);
-      return { channelId, ts: String(data.ts ?? ts), blockCount: blocks.length };
+      const token = resolveToken(config, "bot");
+      const data = await callSlack("chat.update", token, body, context);
+      return withPermalink({ channelId, ts: String(data.ts ?? ts), blockCount: blocks.length }, token, context);
     },
   }),
 
