@@ -92,6 +92,7 @@ After posting or updating, those four tools and `slack_blocks_send`/`slack_block
 | Tool | What it does | Token | Scopes |
 |---|---|---|---|
 | `slack_list_create` | Create a List with typed columns | bot | `lists:write` |
+| `slack_list_update` | Rename a List, or change its description or todo mode | bot | `lists:write` |
 | `slack_list_schema` | Read a List's column and option IDs | bot | `lists:read` |
 | `slack_list_item_create` | Add a row, by column name | bot | `lists:read`, `lists:write` |
 | `slack_list_item_update` | Change cells, by column name | bot | `lists:read`, `lists:write` |
@@ -218,6 +219,8 @@ Most tools don't need an explicit join. When a bot-token call fails with `not_in
 ## Lists
 
 `slack_list_create` wraps `slackLists.create` with the bot token and the `lists:write` scope. Pass a `schema` of typed columns (`key`, `name`, `type`, optional `primary`, and Slack's column `options` passed through verbatim), or copy an existing list's columns with `copyFromListId`, adding `includeCopiedListRecords` to copy its items too. Slack rejects a call that sets both `schema` and `copyFromListId`, so the tool refuses it before calling Slack. `todoMode` adds Slack's completed, assignee, and due-date columns. Slack has no method to add, remove, or retype columns after creation, so the schema has to cover every column up front. The result carries the new `listId` and each column's `id`, which later item writes need.
+
+`slack_list_update` wraps `slackLists.update` with the `lists:write` scope. It changes a list's `name`, `description` (Slack mrkdwn, sent as a `rich_text` block with real mentions), and `todoMode` in place, so the `listId` and every row ID stay valid. It sends only the fields you pass, refuses a call that passes none, and returns which fields it `updated`. It doesn't wait for approval, since each change can be undone with another update. Columns stay out of reach: Slack doesn't let them change after creation.
 
 `slack_list_schema` reads an existing list's columns with the `lists:read` scope. It calls `slackLists.items.list` with `include_list` and a one-item limit, since that response carries the parent list's schema and `slackLists.items.info` would need an item ID first. Each column comes back with its `id`, `key`, `name`, and `type`, and select and multi-select columns add `options` pairing each option ID with its label. Item writes need those IDs rather than the names people see in Slack.
 
