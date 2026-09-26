@@ -47,6 +47,7 @@ describe("slack-workspace", () => {
       "slack_channel_members",
       "slack_channel_create",
       "slack_channel_archive",
+      "slack_channel_unarchive",
       "slack_channel_rename",
       "slack_channel_set_topic",
       "slack_channel_set_purpose",

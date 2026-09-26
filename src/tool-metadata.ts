@@ -54,6 +54,7 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
   slack_channel_members: read,
   slack_channel_create: write,
   slack_channel_archive: write,
+  slack_channel_unarchive: write,
   slack_channel_rename: write,
   slack_channel_set_topic: idempotentWrite,
   slack_channel_set_purpose: idempotentWrite,

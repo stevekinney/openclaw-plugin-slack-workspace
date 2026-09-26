@@ -37,6 +37,15 @@ const existingChannelCases: Case[] = [
     scope: "groups:write",
   },
   {
+    tool: "slack_channel_unarchive",
+    params: { channelId: "C0TEST", confirm: true },
+    method: "conversations.unarchive",
+    body: { channel: "C0TEST" },
+    result: { ok: true },
+    expected: { unarchived: true, channelId: "C0TEST" },
+    scope: "groups:write",
+  },
+  {
     tool: "slack_channel_rename",
     params: { channelId: "C0TEST", name: "renamed", confirm: true },
     method: "conversations.rename",
@@ -100,6 +109,18 @@ describe("channel lifecycle tools on public channels", () => {
       });
     },
   );
+});
+
+describe("slack_channel_unarchive", () => {
+  it("unarchives an archived public channel", async () => {
+    await withMockFetch(slack({ ...PUBLIC, is_archived: true }), async (calls) => {
+      await expect(
+        runTool("slack_channel_unarchive", { channelId: "C0TEST", confirm: true }),
+      ).resolves.toEqual({ unarchived: true, channelId: "C0TEST" });
+      expect(methods(calls)).toEqual(["conversations.info", "conversations.unarchive"]);
+      expect(calls[1].body).toEqual({ channel: "C0TEST" });
+    });
+  });
 });
 
 describe("channel lifecycle tools on private channels", () => {
@@ -181,12 +202,13 @@ describe("channel lifecycle tools on private channels", () => {
   });
 });
 
-describe("confirm guard on archive and rename", () => {
+describe("confirm guard on archive, unarchive, and rename", () => {
   const parameters = (name: string) =>
     getToolPluginMetadata(entry)!.tools.find((tool) => tool.name === name)!.parameters;
 
   it.each([
     ["slack_channel_archive", { channelId: "C0TEST" }],
+    ["slack_channel_unarchive", { channelId: "C0TEST" }],
     ["slack_channel_rename", { channelId: "C0TEST", name: "renamed" }],
   ])("%s requires confirm: true in its schema, with no default", (name, params) => {
     const schema = parameters(name) as { required?: string[]; properties: Record<string, any> };
@@ -200,6 +222,7 @@ describe("confirm guard on archive and rename", () => {
 
   it.each([
     ["slack_channel_archive", { channelId: "C0TEST" }],
+    ["slack_channel_unarchive", { channelId: "C0TEST" }],
     ["slack_channel_rename", { channelId: "C0TEST", name: "renamed" }],
   ])("%s without confirm: true never reaches Slack", async (name, params) => {
     await withMockFetch(
@@ -217,11 +240,18 @@ describe("confirm guard on archive and rename", () => {
 });
 
 describe("channel approvals", () => {
-  it("gates archive and rename, naming the channel", () => {
+  it("gates archive, unarchive, and rename, naming the channel", () => {
     expect(
       approvalFor("slack_channel_archive", { channelId: "C0TEST", confirm: true }),
     ).toMatchObject({
       title: "Archive Slack channel",
+      scope: { kind: "external-post", target: "channel C0TEST" },
+      allowedDecisions: ["allow-once", "deny"],
+    });
+    expect(
+      approvalFor("slack_channel_unarchive", { channelId: "C0TEST", confirm: true }),
+    ).toMatchObject({
+      title: "Unarchive Slack channel",
       scope: { kind: "external-post", target: "channel C0TEST" },
       allowedDecisions: ["allow-once", "deny"],
     });

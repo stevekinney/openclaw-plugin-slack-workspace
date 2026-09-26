@@ -56,6 +56,7 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind | "none"; scopes: st
   slack_channel_create: { token: "bot", scopes: ["channels:manage"] },
   // Every channel tool but create reads conversations.info first to refuse private channels.
   slack_channel_archive: { token: "bot", scopes: ["channels:read", "channels:manage"] },
+  slack_channel_unarchive: { token: "bot", scopes: ["channels:read", "channels:manage"] },
   slack_channel_rename: { token: "bot", scopes: ["channels:read", "channels:manage"] },
   slack_channel_set_topic: { token: "bot", scopes: ["channels:read", "channels:write.topic"] },
   slack_channel_set_purpose: { token: "bot", scopes: ["channels:read", "channels:manage"] },

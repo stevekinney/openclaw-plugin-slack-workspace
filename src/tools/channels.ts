@@ -66,7 +66,7 @@ async function publicOnly<T>(channelId: string, scope: PrivateScope, call: () =>
   }
 }
 
-/** Refuse archive/rename unless the caller passed `confirm: true` explicitly. */
+/** Refuse archive/unarchive/rename unless the caller passed `confirm: true` explicitly. */
 function requireConfirm(confirm: unknown, action: string): void {
   if (confirm !== true) {
     throw new Error(
@@ -341,6 +341,31 @@ export const channelTools = (tool: ToolFactory) => [
         callSlack("conversations.archive", token, { channel: channelId }, context),
       );
       return { archived: true, channelId };
+    },
+  }),
+
+  tool({
+    name: "slack_channel_unarchive",
+    label: "Unarchive Slack channel",
+    description:
+      "Unarchive a public Slack channel: the recovery path for slack_channel_archive. Visible to the whole workspace: the channel returns to search and the channel browser. Requires `confirm: true` and a human's approval. Private channels are refused (they need `groups:write`).",
+    parameters: Type.Object({
+      channelId: publicChannelIdParam(),
+      confirm: confirmParam("unarchive the channel"),
+    }),
+    outputSchema: Type.Object(
+      { unarchived: Type.Literal(true), channelId: Type.String() },
+      { additionalProperties: false },
+    ),
+    async execute({ channelId, confirm }, config, context) {
+      context.signal?.throwIfAborted();
+      requireConfirm(confirm, `unarchive channel ${channelId}`);
+      const token = resolveToken(config);
+      await requirePublicChannel(channelId, token, "groups:write", context);
+      await publicOnly(channelId, "groups:write", () =>
+        callSlack("conversations.unarchive", token, { channel: channelId }, context),
+      );
+      return { unarchived: true, channelId };
     },
   }),
 
@@ -645,8 +670,9 @@ export const channelTools = (tool: ToolFactory) => [
 ];
 
 /**
- * Archive hides a channel from every member's sidebar; rename breaks links and habits
- * built on the old name. Both wait for a human, on top of the schema's `confirm: true`.
+ * Archive hides a channel from every member's sidebar; unarchive brings it back for the
+ * whole workspace; rename breaks links and habits built on the old name. All three wait
+ * for a human, on top of the schema's `confirm: true`.
  */
 export const channelApprovals: ApprovalRule[] = [
   {
@@ -654,6 +680,14 @@ export const channelApprovals: ApprovalRule[] = [
     check: ({ channelId }) => ({
       title: "Archive Slack channel",
       description: `Archive channel ${channelId}. Members lose it from their sidebar until someone unarchives it.`,
+      target: `channel ${channelId}`,
+    }),
+  },
+  {
+    toolName: "slack_channel_unarchive",
+    check: ({ channelId }) => ({
+      title: "Unarchive Slack channel",
+      description: `Unarchive channel ${channelId}. It becomes visible again across the workspace, in search and the channel browser.`,
       target: `channel ${channelId}`,
     }),
   },

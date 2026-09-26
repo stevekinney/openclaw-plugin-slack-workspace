@@ -52,6 +52,7 @@ const gated: Array<[string, Record<string, unknown>, string]> = [
     "chat.deleteScheduledMessage",
   ],
   ["slack_channel_archive", { channelId: "C0TEST", confirm: true }, "conversations.archive"],
+  ["slack_channel_unarchive", { channelId: "C0TEST", confirm: true }, "conversations.unarchive"],
   [
     "slack_channel_rename",
     { channelId: "C0TEST", name: "renamed", confirm: true },
@@ -89,6 +90,7 @@ describe("approval registry", () => {
       "slack_channel_archive",
       "slack_channel_kickoff",
       "slack_channel_rename",
+      "slack_channel_unarchive",
       "slack_list_access_delete",
       "slack_list_item_delete",
       "slack_list_items_delete_multiple",

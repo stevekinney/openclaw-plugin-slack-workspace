@@ -73,6 +73,7 @@ Tools marked † take an optional `channelId`. Inside a Slack conversation, leav
 | `slack_channel_members` | List a channel's member user IDs (read-only) | bot | `channels:read` (`groups:read` for private channels) |
 | `slack_channel_create` | Create a public channel | bot | `channels:manage` |
 | `slack_channel_archive` | Archive a public channel | bot | `channels:read`, `channels:manage` |
+| `slack_channel_unarchive` | Unarchive a public channel (the undo for archive) | bot | `channels:read`, `channels:manage` |
 | `slack_channel_rename` | Rename a public channel | bot | `channels:read`, `channels:manage` |
 | `slack_channel_set_topic` | Set a channel's topic | bot | `channels:read`, `channels:write.topic` |
 | `slack_channel_set_purpose` | Set a channel's purpose | bot | `channels:read`, `channels:manage` |
@@ -175,9 +176,9 @@ The plugin ships three agent skills in `skills/`, which teach the agent when and
 
 ## Approvals
 
-A `before_tool_call` hook asks a human to approve destructive calls before they reach Slack: `slack_canvas_edit` with `operation: "replace"` or `"delete"`, `slack_canvas_delete`, `slack_bookmark_remove`, `slack_scheduled_cancel`, `slack_channel_archive`, `slack_channel_rename`, `slack_list_item_delete`, `slack_list_items_delete_multiple`, `slack_remote_file_remove`, and every `slack_channel_kickoff`. Reviewers get `allow-once` or `deny` only; the plugin doesn't persist trust, so it never offers `allow-always`. The rules live in `src/approvals.ts`. When you add an irreversible or disruptive tool, register its rule there in the same change. `slack_canvas_status_update` is exempt on purpose: it exists for unattended scheduled runs, and it only ever rewrites the one section under its own heading, refusing a heading that matches more than one section.
+A `before_tool_call` hook asks a human to approve destructive calls before they reach Slack: `slack_canvas_edit` with `operation: "replace"` or `"delete"`, `slack_canvas_delete`, `slack_bookmark_remove`, `slack_scheduled_cancel`, `slack_channel_archive`, `slack_channel_unarchive`, `slack_channel_rename`, `slack_list_item_delete`, `slack_list_items_delete_multiple`, `slack_remote_file_remove`, and every `slack_channel_kickoff`. Reviewers get `allow-once` or `deny` only; the plugin doesn't persist trust, so it never offers `allow-always`. The rules live in `src/approvals.ts`. When you add an irreversible or disruptive tool, register its rule there in the same change. `slack_canvas_status_update` is exempt on purpose: it exists for unattended scheduled runs, and it only ever rewrites the one section under its own heading, refusing a heading that matches more than one section.
 
-Archive and rename also require an explicit `confirm: true` argument. The schema has no default for it, and the tool refuses the call before contacting Slack without it. That guard still holds in cron jobs and other automation where no one is around to approve.
+Archive, unarchive, and rename also require an explicit `confirm: true` argument. The schema has no default for it, and the tool refuses the call before contacting Slack without it. That guard still holds in cron jobs and other automation where no one is around to approve.
 
 ## Real-time Search
 
@@ -197,7 +198,7 @@ When the call fails with `missing_scope`, `not_allowed_token_type`, `unknown_met
 
 ## Channel lifecycle
 
-`slack_channel_create`, `slack_channel_archive`, `slack_channel_rename`, `slack_channel_set_topic`, `slack_channel_set_purpose`, and `slack_channel_invite` work on public channels only. The app holds `channels:manage`, `channels:write.topic`, and `channels:write.invites`, but not their private-channel twins (`groups:write`, `groups:write.topic`, `groups:write.invites`). Each tool that takes an existing channel looks it up with `conversations.info` first. If the channel is private, the tool fails with an error naming the `groups:write*` scope it would need, instead of Slack's bare `missing_scope`.
+`slack_channel_create`, `slack_channel_archive`, `slack_channel_unarchive`, `slack_channel_rename`, `slack_channel_set_topic`, `slack_channel_set_purpose`, and `slack_channel_invite` work on public channels only. The app holds `channels:manage`, `channels:write.topic`, and `channels:write.invites`, but not their private-channel twins (`groups:write`, `groups:write.topic`, `groups:write.invites`). Each tool that takes an existing channel looks it up with `conversations.info` first. If the channel is private, the tool fails with an error naming the `groups:write*` scope it would need, instead of Slack's bare `missing_scope`.
 
 `slack_channel_kickoff` stands up a project room in one call: it creates a public channel, then runs whichever of these you pass: set the topic, set the purpose, invite users, create a canvas shared to the channel, and add a link bookmark. It's composed from the same calls as the single-purpose tools. Once the channel exists, a failed step doesn't stop the rest. Each step lands in `steps` with its error, and `complete` is `false` if any of them failed. If the create call fails, the tool throws, because nothing else can run without a channel. Every kickoff waits for a human's approval.
 
