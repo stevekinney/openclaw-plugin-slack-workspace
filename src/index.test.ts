@@ -43,6 +43,8 @@ describe("slack-workspace", () => {
       "slack_bookmark_add",
       "slack_bookmark_edit",
       "slack_bookmark_remove",
+      "slack_channel_list",
+      "slack_channel_members",
       "slack_channel_create",
       "slack_channel_archive",
       "slack_channel_rename",

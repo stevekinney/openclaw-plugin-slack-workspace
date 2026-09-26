@@ -1,6 +1,13 @@
 import { Type } from "typebox";
-import { callSlack, joinPublicChannel, resolveToken, type SlackCallContext } from "../client.js";
+import {
+  callSlack,
+  joinPublicChannel,
+  resolveToken,
+  SlackApiError,
+  type SlackCallContext,
+} from "../client.js";
 import type { ApprovalRule } from "../approvals.js";
+import { cursorParams, toPage, walkPages, type PageRequest } from "../pagination.js";
 import { channelIdParam, type ToolFactory } from "../schemas.js";
 import { addBookmark, slackBookmark } from "./bookmarks.js";
 import { createCanvas, createdCanvasSchema } from "./canvases.js";
@@ -110,7 +117,178 @@ const MEMBERSHIP_NOTE =
 
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+/** A channel as `slack_channel_list` reports it: enough to pick one and decide whether to join. */
+const listedChannel = Type.Object(
+  {
+    id: Type.String(),
+    name: Type.String(),
+    isPrivate: Type.Boolean(),
+    isArchived: Type.Boolean(),
+    isMember: Type.Boolean({ description: "True if the bot is already in the channel." }),
+    topic: Type.Optional(Type.String()),
+    purpose: Type.Optional(Type.String()),
+    memberCount: Type.Optional(Type.Integer()),
+  },
+  { additionalProperties: false },
+);
+
+type RawChannel = Record<string, unknown> & {
+  topic?: { value?: unknown };
+  purpose?: { value?: unknown };
+};
+
+function curateListedChannel(raw: RawChannel) {
+  const topic = typeof raw.topic?.value === "string" ? raw.topic.value : "";
+  const purpose = typeof raw.purpose?.value === "string" ? raw.purpose.value : "";
+  return {
+    id: String(raw.id ?? ""),
+    name: String(raw.name ?? ""),
+    isPrivate: raw.is_private === true,
+    isArchived: raw.is_archived === true,
+    isMember: raw.is_member === true,
+    // Slack sends "" for an unset topic or purpose; drop it rather than echo noise.
+    ...(topic ? { topic } : {}),
+    ...(purpose ? { purpose } : {}),
+    ...(typeof raw.num_members === "number" ? { memberCount: raw.num_members } : {}),
+  };
+}
+
+const matchesQuery = (channel: ReturnType<typeof curateListedChannel>, query: string) => {
+  const needle = query.toLowerCase();
+  return [channel.name, channel.topic, channel.purpose].some((field) =>
+    field?.toLowerCase().includes(needle),
+  );
+};
+
+/** Without `groups:read`, asking for private channels fails outright instead of omitting them. */
+const isGroupsReadMissing = (error: unknown) =>
+  error instanceof SlackApiError &&
+  error.code === "missing_scope" &&
+  /needs scope: groups:read/.test(error.message);
+
+const pagingParams = (itemName: string) => ({
+  cursor: Type.Optional(
+    Type.String({ description: "Resume from the `cursor` a previous call returned." }),
+  ),
+  limit: Type.Optional(
+    Type.Integer({ minimum: 1, maximum: 1000, description: `${itemName} per Slack page.` }),
+  ),
+  maxPages: Type.Optional(
+    Type.Integer({
+      minimum: 1,
+      maximum: 50,
+      description: "Stop after this many Slack pages. Default 10.",
+    }),
+  ),
+});
+
+const pagingOutput = {
+  cursor: Type.Optional(Type.String({ description: "Pass back as `cursor` to continue." })),
+  hasMore: Type.Boolean(),
+};
+
 export const channelTools = (tool: ToolFactory) => [
+  tool({
+    name: "slack_channel_list",
+    label: "List Slack channels",
+    description:
+      "Find channels: every public channel in the workspace, plus private channels the bot is in. Filter with `query`, a case-insensitive substring of the name, topic, or purpose. Each result carries `isMember`, so you can decide what to join with slack_channel_join. Archived channels are left out unless `excludeArchived` is false. Follows Slack's pages up to `maxPages`; if `hasMore` is still true, call again with the returned `cursor` for the rest. Read-only.",
+    parameters: Type.Object({
+      query: Type.Optional(
+        Type.String({
+          minLength: 1,
+          maxLength: 250,
+          description: "Keep channels whose name, topic, or purpose contains this text (case-insensitive).",
+        }),
+      ),
+      excludeArchived: Type.Optional(
+        Type.Boolean({ description: "Leave archived channels out. Default true." }),
+      ),
+      ...pagingParams("Channels"),
+    }),
+    outputSchema: Type.Object(
+      {
+        channels: Type.Array(listedChannel),
+        privateIncluded: Type.Boolean({
+          description:
+            "False when the bot token lacks `groups:read`, so only public channels were listed.",
+        }),
+        ...pagingOutput,
+      },
+      { additionalProperties: false },
+    ),
+    async execute({ query, excludeArchived = true, cursor, limit, maxPages }, config, context) {
+      context.signal?.throwIfAborted();
+      const token = resolveToken(config);
+      const walk = (types: string) =>
+        walkPages(
+          async (request: PageRequest) => {
+            const data = await callSlack(
+              "conversations.list",
+              token,
+              { types, exclude_archived: excludeArchived, ...cursorParams(request) },
+              context,
+            );
+            return toPage<RawChannel>(data, "channels");
+          },
+          { cursor, limit, maxPages, signal: context.signal },
+        );
+      let privateIncluded = true;
+      let page;
+      try {
+        page = await walk("public_channel,private_channel");
+      } catch (error) {
+        if (!isGroupsReadMissing(error)) throw error;
+        privateIncluded = false;
+        page = await walk("public_channel");
+      }
+      const channels = page.items.map(curateListedChannel);
+      return {
+        channels: query ? channels.filter((channel) => matchesQuery(channel, query)) : channels,
+        privateIncluded,
+        ...(page.cursor ? { cursor: page.cursor } : {}),
+        hasMore: page.hasMore,
+      };
+    },
+  }),
+
+  tool({
+    name: "slack_channel_members",
+    label: "List Slack channel members",
+    description:
+      "List the user IDs of a channel's members. Follows Slack's pages up to `maxPages`; if `hasMore` is still true, call again with the returned `cursor` for the rest. Read-only.",
+    parameters: Type.Object({
+      channelId: channelIdParam(),
+      ...pagingParams("Members"),
+    }),
+    outputSchema: Type.Object(
+      { channelId: Type.String(), userIds: Type.Array(Type.String()), ...pagingOutput },
+      { additionalProperties: false },
+    ),
+    async execute({ channelId, cursor, limit, maxPages }, config, context) {
+      context.signal?.throwIfAborted();
+      const token = resolveToken(config);
+      const page = await walkPages(
+        async (request) => {
+          const data = await callSlack(
+            "conversations.members",
+            token,
+            { channel: channelId, ...cursorParams(request) },
+            context,
+          );
+          return toPage<unknown>(data, "members");
+        },
+        { cursor, limit, maxPages, signal: context.signal },
+      );
+      return {
+        channelId,
+        userIds: page.items.map(String),
+        ...(page.cursor ? { cursor: page.cursor } : {}),
+        hasMore: page.hasMore,
+      };
+    },
+  }),
+
   tool({
     name: "slack_channel_create",
     label: "Create Slack channel",

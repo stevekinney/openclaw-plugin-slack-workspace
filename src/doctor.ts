@@ -49,6 +49,10 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind | "none"; scopes: st
   slack_bookmark_add: { token: "bot", scopes: ["bookmarks:write"] },
   slack_bookmark_edit: { token: "bot", scopes: ["bookmarks:write"] },
   slack_bookmark_remove: { token: "bot", scopes: ["bookmarks:write"] },
+  // Private channels also need groups:read; without it the list falls back to public only.
+  slack_channel_list: { token: "bot", scopes: ["channels:read"] },
+  // groups:read stands in for channels:read on private channels.
+  slack_channel_members: { token: "bot", scopes: ["channels:read"] },
   slack_channel_create: { token: "bot", scopes: ["channels:manage"] },
   // Every channel tool but create reads conversations.info first to refuse private channels.
   slack_channel_archive: { token: "bot", scopes: ["channels:read", "channels:manage"] },
