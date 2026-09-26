@@ -30,6 +30,7 @@ describe("slack-workspace", () => {
       "slack_message_get",
       "slack_message_delete",
       "slack_post_ephemeral",
+      "slack_work_object_post",
       "slack_canvas_create",
       "slack_canvas_edit",
       "slack_canvas_sections",

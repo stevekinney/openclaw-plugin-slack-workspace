@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { Type, type Static } from "typebox";
 import type { ApprovalRule } from "../approvals.js";
-import { authTest, callSlack, resolveToken, type PluginConfig, type SlackCallContext } from "../client.js";
+import { authTest, callSlack, resolveToken, SlackApiError, type PluginConfig, type SlackCallContext } from "../client.js";
 import { cursorParams, toPage } from "../pagination.js";
 import { resolveChannelId } from "../tool.js";
 import {
@@ -246,6 +246,36 @@ async function withPermalink<T extends { channelId: string; ts: string }>(
     return result;
   }
 }
+
+/** Work Object entity types slack_work_object_post supports (docs.slack.dev/messaging/work-objects-implementation). */
+type WorkObjectType = "task" | "incident" | "file" | "content_item";
+
+/** Default `display_type` label for each Work Object entity type. */
+const WORK_OBJECT_LABELS: Record<WorkObjectType, string> = {
+  task: "Task",
+  incident: "Incident",
+  file: "Document",
+  content_item: "Page",
+};
+
+/** Entity types whose schema has a `status` field. */
+const STATUS_TYPES = new Set<string>(["task", "incident"]);
+
+/**
+ * Errors a plain post would hit too, so they are not a reason to fall back from a
+ * Work Object to a Block Kit card. Anything else is taken as a rejected entity.
+ */
+const PLAIN_POST_ERRORS = new Set([
+  "channel_not_found",
+  "not_in_channel",
+  "is_archived",
+  "invalid_auth",
+  "not_authed",
+  "token_revoked",
+  "account_inactive",
+  "missing_scope",
+  "ratelimited",
+]);
 
 async function postOrUpdate(
   config: PluginConfig,
@@ -865,6 +895,122 @@ export const messagingTools = (tool: ToolFactory) => [
         throw new Error("chat.postEphemeral succeeded but returned no message_ts.");
       }
       return { channelId, userId, ephemeralTs: data.message_ts };
+    },
+  }),
+
+  tool({
+    name: "slack_work_object_post",
+    label: "Post Slack Work Object card",
+    description:
+      "Post a native Work Object card for an external item — an issue, task, incident, or doc — showing its title, display ID, type, status, and link. Richer than pasting a URL. Clicking the card opens only a static placeholder: this plugin can't serve the item's details pane. If Slack rejects the Work Object, posts an equivalent plain Block Kit card instead and returns `mode: \"fallback\"` with the reason.",
+    parameters: Type.Object({
+      channelId: activeChannelIdParam(),
+      title: Type.String({ minLength: 1, description: "Item title, e.g. \"Checkout fails on Safari\"." }),
+      url: Type.String({
+        pattern: "^https?://",
+        description: "Link to the item in its own system. Must be http(s).",
+      }),
+      entityType: Type.Optional(
+        Type.Union(
+          [Type.Literal("task"), Type.Literal("incident"), Type.Literal("file"), Type.Literal("content_item")],
+          {
+            description:
+              "Slack entity type: `task` (issues, tickets; default), `incident`, `file` (documents), or `content_item` (pages, articles). Only task and incident show a status.",
+          },
+        ),
+      ),
+      displayId: Type.Optional(Type.String({ description: "Human-facing ID, e.g. \"SHOP-42\"." })),
+      displayType: Type.Optional(
+        Type.String({ description: "Type label on the card, e.g. \"Issue\". Defaults from entityType." }),
+      ),
+      status: Type.Optional(
+        Type.String({ description: "Current status, e.g. \"In progress\". task and incident only." }),
+      ),
+      externalId: Type.Optional(
+        Type.String({ description: "The item's stable ID in its own system. Defaults to displayId, then url." }),
+      ),
+      productName: Type.Optional(Type.String({ description: "Source product shown on the card, e.g. \"Linear\"." })),
+      threadTs: threadTsParam,
+      replyBroadcast: replyBroadcastParam,
+    }),
+    outputSchema: Type.Object(
+      {
+        mode: Type.Union([Type.Literal("work_object"), Type.Literal("fallback")], {
+          description: "`fallback` means Slack rejected the Work Object and a plain Block Kit card was posted.",
+        }),
+        channelId: Type.String(),
+        ts: Type.String(),
+        permalink: permalinkField,
+        reason: Type.Optional(Type.String({ description: "Why the Work Object was rejected, for `fallback`." })),
+      },
+      { additionalProperties: false },
+    ),
+    async execute(
+      {
+        channelId: explicitChannelId,
+        title,
+        url,
+        entityType = "task",
+        displayId,
+        displayType = WORK_OBJECT_LABELS[entityType],
+        status,
+        externalId,
+        productName,
+        threadTs,
+        replyBroadcast,
+      },
+      config,
+      context,
+    ) {
+      context.signal?.throwIfAborted();
+      if (status && !STATUS_TYPES.has(entityType)) {
+        throw new Error(
+          `Slack's ${entityType} entity has no status field. Use entityType "task" or "incident", or omit status.`,
+        );
+      }
+      const channelId = resolveChannelId(explicitChannelId, context);
+      const token = resolveToken(config, "bot");
+      const summary = `${displayType}${displayId ? ` ${displayId}` : ""}: ${title}${status ? ` (${status})` : ""}`;
+      const body: Record<string, unknown> = {
+        channel: channelId,
+        text: escapeText(`${summary} — ${url}`),
+        unfurl_links: false,
+        unfurl_media: false,
+      };
+      if (threadTs) body.thread_ts = threadTs;
+      if (threadTs && replyBroadcast) body.reply_broadcast = true;
+      // No app_unfurl_url: this is a proactive post, not a reply to a link_shared unfurl.
+      const entity = {
+        entity_type: `slack#/entities/${entityType}`,
+        url,
+        external_ref: { id: externalId ?? displayId ?? url, type: entityType },
+        entity_payload: {
+          attributes: {
+            title: { text: title },
+            ...(displayId && { display_id: displayId }),
+            display_type: displayType,
+            ...(productName && { product_name: productName }),
+          },
+          ...(status && { fields: { status: { value: status } } }),
+        },
+      };
+      try {
+        const data = await callSlack("chat.postMessage", token, { ...body, metadata: { entities: [entity] } }, context);
+        const posted = { channelId: String(data.channel ?? channelId), ts: String(data.ts ?? "") };
+        return { mode: "work_object" as const, ...(await withPermalink(posted, token, context)) };
+      } catch (error) {
+        if (!(error instanceof SlackApiError) || PLAIN_POST_ERRORS.has(error.code)) throw error;
+        context.signal?.throwIfAborted();
+        context.api?.logger?.warn(`slack-workspace: Work Object rejected; posting a plain card: ${error.message}`);
+        const details = [displayType, displayId, status].filter(Boolean).map((part) => escapeText(part!));
+        const blocks = [
+          { type: "section", text: { type: "mrkdwn", text: `*<${url}|${escapeText(title)}>*` } },
+          { type: "context", elements: [{ type: "mrkdwn", text: details.join(" · ") }] },
+        ];
+        const data = await callSlack("chat.postMessage", token, { ...body, blocks }, context);
+        const posted = { channelId: String(data.channel ?? channelId), ts: String(data.ts ?? "") };
+        return { mode: "fallback" as const, ...(await withPermalink(posted, token, context)), reason: error.message };
+      }
     },
   }),
 ];

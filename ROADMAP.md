@@ -1154,6 +1154,16 @@ that's a live, browser-driven verification, not code or a doc — see H-03 and
   - Tests: n/a (manual verification).
   - Size: S
 
+- [~] **O-13: [MANUAL] Enable Work Object Previews for the app** — On api.slack.com/apps, open the app, choose **Work Object Previews** in the sidebar, turn the toggle on, select the `task`, `incident`, `file`, and `content_item` entity types, and save (docs.slack.dev/messaging/work-objects-implementation, verified 2026-09-26). Until this is done, **M-14**'s `slack_work_object_post` may fall back to plain Block Kit cards.
+  - Why: Slack only renders Work Objects for entity types the app has enabled.
+  - Scope(s) & token type: none new (`chat:write`, existing).
+  - API methods: n/a (app settings).
+  - Files to touch: none in this repo.
+  - Depends on: M-14.
+  - Acceptance criteria: the toggle is on; a live `slack_work_object_post` in `lostgradient` returns `mode: "work_object"` and renders as a Work Object card.
+  - Tests: n/a (manual verification).
+  - Size: S
+
 - [~] **O-11: [MANUAL] [DEFERRED] Trim dead/low-value scopes from the manifest and reinstall** — **Deferred by the owner on 2026-09-23: do not execute until explicitly re-opened; the owner may keep some of these scopes for new features.** **Scope hygiene** below identifies several scopes with no live code path and no scheduled justification: `workflow.steps:execute` (permanently retired Slack feature), `reminders:read`/`reminders:write` (superseded by **R-01**'s bot-token approach), `incoming-webhook` (redundant with `chat:write`), and `users:write` (only affects bot presence, already covered by `bot_user.always_online`). Remove these from the Slack app manifest on api.slack.com and reinstall.
   - Why: **Scope hygiene**'s findings are otherwise permanent prose with no execution path, unlike O-06..O-10, which are actionable; this closes that gap so least-privilege (guiding principle 2) is actually enforced, not just documented.
   - Scope(s) & token type: n/a (Slack app manifest/settings).
