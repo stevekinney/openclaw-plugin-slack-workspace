@@ -171,7 +171,12 @@ export const targetParams = {
   metadata: metadataParam,
 };
 
+/** Link to the posted message; absent when `chat.getPermalink` failed. */
+export const permalinkField = Type.Optional(
+  Type.String({ description: "Link to the posted message, for sharing. Absent if the lookup failed." }),
+);
+
 export const postResultSchema = Type.Object(
-  { channelId: Type.String(), ts: Type.String(), updated: Type.Boolean() },
+  { channelId: Type.String(), ts: Type.String(), updated: Type.Boolean(), permalink: permalinkField },
   { additionalProperties: false },
 );

@@ -19,7 +19,7 @@ describe("channelId defaults to the active Slack turn", () => {
   it("slack_post_table posts into the current conversation when channelId is omitted", async () => {
     await withMockFetch(slack, async (calls) => {
       const result = await runInTurn("slack_post_table", table, SLACK_TURN);
-      expect(calls).toHaveLength(1);
+      expect(calls.map((call) => call.method)).toEqual(["chat.postMessage", "chat.getPermalink"]);
       expect(calls[0].method).toBe("chat.postMessage");
       expect(calls[0].body.channel).toBe("C0ACTIVE");
       expect(result).toMatchObject({ channelId: "C0ACTIVE", updated: false });

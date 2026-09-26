@@ -158,7 +158,7 @@ describe("slack_post_table", () => {
           "x".repeat(index === 0 ? 91 : 97),
         ]),
       });
-      expect(calls).toHaveLength(1);
+      expect(calls.map((call) => call.method)).toEqual(["chat.postMessage", "chat.getPermalink"]);
     });
   });
 
@@ -171,7 +171,7 @@ describe("slack_post_table", () => {
         rows: [["a", 1]],
       });
       expect(result).toEqual({ channelId: "C0TEST", ts: "1700000000.000100", updated: false });
-      expect(calls).toHaveLength(1);
+      expect(calls.map((call) => call.method)).toEqual(["chat.postMessage", "chat.getPermalink"]);
       expect(calls[0].method).toBe("chat.postMessage");
       expect(calls[0].headers.authorization).toBe("Bearer xoxb-test");
       const [table] = calls[0].body.blocks as { rows: unknown[][] }[];
@@ -257,7 +257,7 @@ describe("slack_post_plan", () => {
         title: "Deploy",
         tasks: statuses.map((status) => ({ title: status, status })),
       });
-      expect(calls).toHaveLength(1);
+      expect(calls.map((call) => call.method)).toEqual(["chat.postMessage", "chat.getPermalink"]);
       expect(calls[0].body.text).toBe("Deploy — 1/4 complete");
       const [plan] = calls[0].body.blocks as { tasks: { task_id: string; status: string }[] }[];
       expect(plan.tasks.map((task) => task.status)).toEqual(statuses);
