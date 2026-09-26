@@ -180,7 +180,6 @@ describe("auto-join on not_in_channel", () => {
       const result = await runTool("slack_channel_set_topic", { channelId: "C0TEST", topic: "t" });
       expect(result).toEqual({ channelId: "C0TEST", topic: "t", autoJoined: true });
       expect(methods(calls)).toEqual([
-        "conversations.info",
         "conversations.setTopic",
         "conversations.info",
         "conversations.join",
@@ -270,10 +269,10 @@ describe("slack_channel_leave", () => {
     });
   });
 
-  it("refuses a private channel (needs groups:write)", async () => {
+  it("refuses a private channel, which the bot couldn't rejoin on its own", async () => {
     await withMockFetch(membershipSlack(PRIVATE), async (calls) => {
       await expect(runTool("slack_channel_leave", { channelId: "C0PRIV" })).rejects.toThrow(
-        "`groups:write`",
+        "Channel C0PRIV is a private channel. slack_channel_leave only leaves public channels",
       );
       expect(methods(calls)).toEqual(["conversations.info"]);
     });
