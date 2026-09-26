@@ -114,6 +114,8 @@ After posting or updating, those four tools and `slack_blocks_send`/`slack_block
 | `slack_remote_file_update` | Update a remote file's details | bot | `remote_files:write` |
 | `slack_remote_file_remove` | Remove a remote file from Slack | bot | `remote_files:write` |
 | `slack_remote_file_share` | Share a remote file into channels | bot | `remote_files:share` |
+| `slack_remote_file_info` | Look up one remote file | bot | `remote_files:read` |
+| `slack_remote_file_list` | List remote files, optionally in one channel | bot | `remote_files:read` |
 
 ### Assistant threads, user groups, and workflows
 
@@ -165,7 +167,7 @@ Each secret can be a plain string or a SecretRef (`{ source, provider?, id }`). 
 
 The Slack app needs these scopes, split by token:
 
-**Bot token (`xoxb-`):** `assistant:write`, `bookmarks:read`, `bookmarks:write`, `canvases:read`, `canvases:write`, `channels:history`, `channels:join`, `channels:manage`, `channels:read`, `channels:write.invites`, `channels:write.topic`, `chat:write`, `files:read`, `files:write`, `groups:write`, `groups:write.invites`, `groups:write.topic`, `im:write`, `lists:read`, `lists:write`, `metadata.message:read`, `remote_files:share`, `remote_files:write`, `usergroups:read`. Add `groups:history`, `im:history`, and `mpim:history` to read threads outside public channels.
+**Bot token (`xoxb-`):** `assistant:write`, `bookmarks:read`, `bookmarks:write`, `canvases:read`, `canvases:write`, `channels:history`, `channels:join`, `channels:manage`, `channels:read`, `channels:write.invites`, `channels:write.topic`, `chat:write`, `files:read`, `files:write`, `groups:write`, `groups:write.invites`, `groups:write.topic`, `im:write`, `lists:read`, `lists:write`, `metadata.message:read`, `remote_files:read`, `remote_files:share`, `remote_files:write`, `usergroups:read`. Add `groups:history`, `im:history`, and `mpim:history` to read threads outside public channels.
 
 **User token (`xoxp-`):** `search:read`, `search:read.public`. Add `search:read.private`, `search:read.im`, `search:read.mpim`, `search:read.files` and `search:read.users` to let `slack_search_context` cover private channels, DMs, files and people.
 
@@ -242,6 +244,8 @@ Most tools don't need an explicit join. When a bot-token call fails with `not_in
 ## Remote files
 
 `slack_remote_file_add` registers an external document, like a Linear issue or a generated report link, as a native Slack file object with a preview card, so it shows up in Slack as a file instead of a bare hyperlink. It wraps `files.remote.add` and takes an `externalId` (your own stable, unique ID for the document), `externalUrl`, and `title`, plus optional `filetype` and `indexableFileContents`, the plain text Slack indexes for search. `slack_remote_file_update` changes those fields in place, and `slack_remote_file_remove` takes the file out of Slack and out of every channel it was shared to. The external document itself is untouched, but the removal waits for approval. `slack_remote_file_share` posts the file into one or more channels. Adding doesn't share, so call share afterward. Update, remove, and share find the file by exactly one of `fileId` or `externalId`. Add, update, and remove need the `remote_files:write` scope; share needs `remote_files:share`. Every remote-file tool uses the bot token, because `files.remote.add` rejects user tokens. These scopes are separate from `files:read` and `files:write`, which cover uploaded bytes like `slack_file_upload`. The result is the file's `{ fileId, externalId, externalUrl, title, permalink }`, and share adds the `channelIds`.
+
+`slack_remote_file_info` and `slack_remote_file_list` find remote files again in a later turn, with the `remote_files:read` scope. `slack_remote_file_info` wraps `files.remote.info` and takes exactly one of `fileId` or `externalId`. `slack_remote_file_list` wraps `files.remote.list` and walks Slack's cursor pages with the shared pagination helper, up to ten pages per call; when `hasMore` is still true, pass the returned `cursor` back to continue. Pass `channelId` to list only the files shared into that channel. Both return files in the same `{ fileId, externalId, externalUrl, title, permalink }` shape as the write tools.
 
 ## Scheduled messages
 
