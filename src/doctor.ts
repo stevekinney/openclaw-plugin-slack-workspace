@@ -31,6 +31,7 @@ export const TOOL_SCOPES: Record<string, { token: TokenKind | "none"; scopes: st
   // groups:/im:/mpim:history stand in for channels:history on private channels and DMs.
   slack_message_get: { token: "bot", scopes: ["channels:history", "metadata.message:read"] },
   slack_post_ephemeral: { token: "bot", scopes: ["chat:write"] },
+  slack_work_object_post: { token: "bot", scopes: ["chat:write"] },
   // Reads the message back (history) to check the bot posted it before chat.delete.
   slack_message_delete: { token: "bot", scopes: ["channels:history", "chat:write"] },
   slack_canvas_create: { token: "bot", scopes: ["canvases:write"] },

@@ -34,6 +34,7 @@ export const TOOL_METADATA: Record<string, ToolMetadata> = {
   slack_message_get: read,
   slack_message_delete: write,
   slack_post_ephemeral: write,
+  slack_work_object_post: write,
   slack_canvas_create: write,
   slack_canvas_edit: write,
   slack_canvas_sections: read,

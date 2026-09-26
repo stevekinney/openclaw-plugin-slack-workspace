@@ -29,12 +29,15 @@ Tools marked † take an optional `channelId`. Inside a Slack conversation, leav
 | `slack_message_get` † | Find messages by the metadata stamped on them and return their `ts` | bot | `channels:history`, `metadata.message:read` |
 | `slack_message_delete` † | Delete a message this bot posted (approval-gated) | bot | `channels:history`, `chat:write` |
 | `slack_post_ephemeral` † | Send one user a message only they can see | bot | `chat:write` |
+| `slack_work_object_post` † | Post a native Work Object card for an external issue, task, or doc | bot | `chat:write` |
 
 `slack_post_table`, `slack_post_plan`, `slack_post_chart`, and `slack_post_rich_text` also take `updateTs` to rewrite a message they posted earlier.
 
 After posting or updating, those four tools and `slack_blocks_send`/`slack_blocks_update` call `chat.getPermalink` and return the message's `permalink`, so the agent can link to what it posted. If the lookup fails, the post still succeeds: the result just omits `permalink` and a warning is logged.
 
 `slack_message_delete` wraps `chat.delete` so the agent can clean up its own scratch or obsolete cards. Before deleting, it reads the message back with `conversations.history`, or `conversations.replies` when you pass the thread parent's `threadTs`, and compares its author with the bot's `auth.test` identity. If another user or app posted the message, or the message can't be found, the tool refuses the call and never reaches `chat.delete`. Deleting is irreversible, so every call also waits for a human's approval.
+
+`slack_work_object_post` posts a [Work Object](https://docs.slack.dev/messaging/work-objects-overview) card for an item that lives in another system, like an issue, incident, or doc. It calls `chat.postMessage` with entity metadata and no `app_unfurl_url`, because it's a proactive post rather than a reply to a link unfurl. The card shows `title`, `displayId`, `displayType`, `status`, and a link to `url`. `entityType` picks Slack's entity schema: `task` (the default), `incident`, `file`, or `content_item`. Only `task` and `incident` have a status field, so the tool refuses a `status` on the others before calling Slack. Clicking the card opens only a static placeholder. Filling in the details pane means handling Slack's `entity_details_requested` event, and only the bundled channel plugin receives events. Slack renders Work Objects only after someone turns on **Work Object Previews** in the app's settings (roadmap O-13). If Slack rejects the entity metadata, the tool posts an equivalent plain Block Kit card, with a linked title and a context line, and returns `mode: "fallback"` with Slack's error as `reason`. Errors that a plain post would hit too, like `channel_not_found` or `missing_scope`, are thrown as usual. The result is `{ mode, channelId, ts, permalink?, reason? }`.
 
 ### Scheduling and reminders
 
