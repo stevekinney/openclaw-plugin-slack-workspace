@@ -927,6 +927,160 @@ promoted to Tier 0.5 once the migration was confirmed (see **Decisions**).
 
 ---
 
+## Tier 5 — Search, Agent Sessions, channels, and messaging (added 2026-09-26)
+
+From a second research round (a research agent plus Codex), with each load-bearing
+claim checked against docs.slack.dev before being added. The owner approved all
+four feature groups and granted the needed scopes on 2026-09-26: user-token
+`search:read.public/.private/.im/.mpim/.users` and bot `groups:write`,
+`groups:write.topic`, `groups:write.invites`. `openclaw slack-workspace doctor`
+confirms both tokens carry them.
+
+**Owner requirement: fail soft when a scope is missing.** Every task below that uses
+a newly granted scope must keep working, in a reduced form, on an install that
+lacks it: detect `missing_scope` / `not_allowed_token_type` / `unknown_method`,
+fall back to the previous behavior, and say so in the tool result, with a
+`doctor` hint. Add the new scopes to `TOOL_SCOPES` in `src/doctor.ts` as
+*optional* scopes, so `doctor` reports them as degraded rather than failing.
+
+- [ ] **S-08: Add Real-time Search (assistant.search.context) on the user token, with fallback to legacy search** — Add `slack_search_context`, which wraps `assistant.search.context` with the **user** token. User-token calls need no `action_token` (docs.slack.dev/reference/methods/assistant.search.context, verified 2026-09-26). It returns semantically ranked messages with surrounding context messages and permalinks, and can optionally search channels, users and files. Keep `slack_search`, and have it point to the new tool.
+  - Why: Slack steers AI apps away from `search.messages`/`search.files`. The plugin's earlier "dead end" only applied to bot tokens. This is the biggest improvement to how the agent answers "what did we decide about X?".
+  - Scope(s) & token type: user token; `search:read.public` required, and `search:read.private`, `.im`, `.mpim`, `.files`, `.users` widen coverage (all granted 2026-09-26). Tier 5 rate limit, ~10/min per user.
+  - API methods: `assistant.search.context`, and `assistant.search.info` to see what the workspace supports (for example whether semantic search is enabled).
+  - Fallback: if the call fails with `missing_scope`, `not_allowed_token_type`, `unknown_method`, or a feature-not-enabled error, run the equivalent `search.messages` query instead, and return `mode: "legacy"` with a one-line reason and a `doctor` hint.
+  - Files to touch: `src/tools/search.ts`, `src/schemas.ts`, `src/doctor.ts`, `src/tool-metadata.ts`, README.
+  - Depends on: none.
+  - Acceptance criteria: mocked tests cover a context search returning messages plus context and permalinks, each fallback trigger producing a legacy result with `mode: "legacy"`, and rate-limit handling. The tool description says results are turn-local and must not be stored. Live check against `lostgradient` listed under "Live verification pending".
+  - Tests: mocked `assistant.search.context` success; mocked `missing_scope` → `search.messages` fallback; mocked `ratelimited`.
+  - Size: M
+
+- [ ] **M-11: Migrate assistant tools to the Agent Sessions API before the Feb 2027 assistant_view deprecation** — `slack_assistant_set_title` should call `agents.sessions.rename` (`title`) instead of `assistant.threads.setTitle`, per Slack's migration guide (docs.slack.dev/ai/migrating-to-agent-messaging, changelog 2026-08-20). `slack_assistant_suggest_prompts` keeps `assistant.threads.setSuggestedPrompts`, but its description should say prompts now appear at the top of the Messages tab, not per thread.
+  - Why: Slack deprecates `assistant_view` in February 2027. Moving now avoids a hard break, and `agent_view` is already on in the Bowie manifest.
+  - Scope(s) & token type: bot token, `chat:write` (existing). Tier 3.
+  - API methods: `agents.sessions.rename`; `assistant.threads.setTitle` stays as the fallback.
+  - Fallback: on `unknown_method` or `missing_scope` from `agents.sessions.rename`, call `assistant.threads.setTitle` and report `api: "assistant.threads"`.
+  - Files to touch: `src/tools/assistant.ts`, `src/doctor.ts`, README. Also add a note under Explicitly out of scope: `agents.sessions.setStatus` belongs to the channel plugin, which drives session status.
+  - Depends on: none.
+  - Acceptance criteria: title calls use `agents.sessions.rename`, and the legacy fallback is exercised in tests. Suggested-prompts description updated.
+  - Tests: mocked rename success; mocked `unknown_method` → legacy setTitle.
+  - Size: S
+
+- [ ] **S-09: Add channel discovery — slack_channel_list and slack_channel_members** — Wrap `conversations.list` (public channels, plus private ones the bot is in; filter by name, topic or purpose substring; `excludeArchived` defaults to true) and `conversations.members`, both paginated with `src/pagination.ts`. Each result includes `isMember`, so the agent can decide what to join.
+  - Why: The owner prioritized channel management and self-joining, but today the agent can only join a channel when a call fails or it's handed an ID. It has no way to find channels.
+  - Scope(s) & token type: bot token, `channels:read` (existing); `groups:read` (existing) for private channels the bot is in.
+  - API methods: `conversations.list` (Tier 2), `conversations.members` (Tier 4).
+  - Files to touch: `src/tools/channels.ts`, `src/schemas.ts`, `src/doctor.ts`, README.
+  - Depends on: none.
+  - Acceptance criteria: list supports name, topic and purpose filtering with pagination, and caps at `maxPages`. Members returns user IDs with pagination. Neither is approval-gated, because both are read-only.
+  - Tests: mocked multi-page list with filtering; mocked members pagination.
+  - Size: S
+
+- [ ] **S-10: Add slack_channel_unarchive (approval-gated)** — Wrap `conversations.unarchive` as the recovery path for `slack_channel_archive`, with the same `confirm: true` requirement and an O-02 approval rule, because unarchiving is visible to the whole workspace.
+  - Why: Archive currently has no supported undo.
+  - Scope(s) & token type: bot token, `channels:manage` for public channels; `groups:write` for private ones (see S-11).
+  - API methods: `conversations.unarchive` (Tier 2).
+  - Files to touch: `src/tools/channels.ts`, `src/approvals.ts` via `channelApprovals`, `src/approvals.test.ts`, README.
+  - Depends on: none.
+  - Acceptance criteria: requires `confirm: true` and has an approval rule, which the approval registry test lists. A mocked archived channel is unarchived.
+  - Tests: mocked success; missing `confirm` never calls Slack; a denied approval never calls Slack.
+  - Size: S
+
+- [ ] **S-11: Support private channels in the channel lifecycle tools, falling back to public-only without groups:write*** — Now that `groups:write`, `groups:write.topic` and `groups:write.invites` are granted, let archive, unarchive, rename, set_topic, set_purpose, invite and kickoff act on private channels the bot is a member of, instead of refusing them. `slack_channel_create` gains an `isPrivate` option.
+  - Why: The owner asked for full channel management. Private channels were only refused because these scopes were missing.
+  - Scope(s) & token type: bot token, `groups:write*` (granted 2026-09-26).
+  - API methods: the same `conversations.*` methods, which accept private channel IDs.
+  - Fallback: if a private-channel call returns `missing_scope` naming a `groups:*` scope, raise the existing explicit private-channel error (`privateChannelError`), naming the missing scope and pointing to `doctor`. Behavior on installs without the scopes is unchanged.
+  - Files to touch: `src/tools/channels.ts`, `src/approvals.ts` (approval prompts should say "private channel" when it is one), `src/doctor.ts`, `src/channels.test.ts`, README.
+  - Depends on: S-10 (shares `channels.ts`).
+  - Acceptance criteria: mocked private-channel archive, rename, topic and invite succeed. A mocked `missing_scope (needs groups:write)` produces the explicit fallback error. Archive and rename keep `confirm` plus approval. `privateChannelError` stays only as the fallback path.
+  - Tests: mocked private success per tool; mocked missing-scope fallback per tool.
+  - Size: M
+
+- [ ] **M-12: Return permalinks from posting tools** — After posting or updating a message, `slack_post_table/plan/chart/rich_text` and `slack_blocks_send/update` call `chat.getPermalink` and include `permalink` in their result, so the agent can link to what it posted.
+  - Why: Today they return only `channelId`/`ts`, so the agent can't share a clickable link to its own card.
+  - Scope(s) & token type: bot token; `chat.getPermalink` needs no extra scope beyond access to the channel.
+  - API methods: `chat.getPermalink` (Tier 4).
+  - Fallback: if the permalink call fails, return the post result without `permalink` and log a warning. It must never fail an otherwise successful post.
+  - Files to touch: `src/tools/messaging.ts`, output schemas.
+  - Depends on: none.
+  - Acceptance criteria: output schemas include an optional `permalink`. A failed permalink call still returns success.
+  - Tests: mocked post plus permalink; mocked permalink failure.
+  - Size: S
+
+- [ ] **M-13: Add slack_message_delete (approval-gated), limited to the bot's own messages** — Wrap `chat.delete` so the agent can clean up its own scratch or obsolete cards. Before deleting, use `conversations.history` or `conversations.replies` to check that the message was posted by this bot, and refuse otherwise.
+  - Why: The agent can post and update but can't retract a card. Deletion is irreversible, so it's gated.
+  - Scope(s) & token type: bot token, `chat:write` (existing).
+  - API methods: `chat.delete` (Tier 3); `conversations.history` or `conversations.replies` for the ownership check.
+  - Files to touch: `src/tools/messaging.ts`, `src/approvals.ts`, `src/approvals.test.ts`, README.
+  - Depends on: none.
+  - Acceptance criteria: an approval rule exists. Deleting another author's message is refused before `chat.delete` is called.
+  - Tests: mocked own-message delete; mocked other-author refusal; a denied approval never calls Slack.
+  - Size: S
+
+- [ ] **I-14: Gate wide-reach shares behind approval** — Add O-02 approval rules for `slack_canvas_access_set` and `slack_list_access_set` when they grant `owner` access or share with any channel (not individual users). Individual user read/write grants stay ungated.
+  - Why: Sharing widely is hard to undo, because revoking access doesn't un-show content that people already saw. This matches the existing bar for "irreversible or disruptive".
+  - Scope(s) & token type: none new.
+  - API methods: none new.
+  - Files to touch: `src/tools/canvases.ts`, `src/tools/lists.ts`, `src/approvals.test.ts`.
+  - Depends on: none.
+  - Acceptance criteria: owner grants and channel shares require approval; user-only read/write grants don't. The registry test is updated.
+  - Tests: gated cases and ungated cases.
+  - Size: S
+
+- [ ] **L-09: Add slack_list_update (name, description, todo mode)** — Wrap `slackLists.update` (exists, `lists:write`, verified 2026-09-26) to change a List's name, description, and `todo_mode`. Column schema stays out of scope, because Slack doesn't allow column changes after creation.
+  - Why: Lets the agent maintain a List without recreating it, which would invalidate its row IDs.
+  - Scope(s) & token type: bot token, `lists:write` (existing).
+  - API methods: `slackLists.update`.
+  - Files to touch: `src/tools/lists.ts`, README.
+  - Depends on: none.
+  - Acceptance criteria: mocked update of each field. Not approval-gated, because the change is reversible.
+  - Tests: mocked success per field; mocked `list_not_found`.
+  - Size: S
+
+- [ ] **L-10: Spike + ship List export (slackLists.download.start/get)** — Confirm the async export flow live: start a download, poll `download.get` until it's ready, and find the output format and URL lifetime. Ship `slack_list_export` if the flow works with the bot token, or record the negative finding.
+  - Why: Lets the agent hand back a List as a file (e.g. CSV) for reports.
+  - Scope(s) & token type: bot token, `lists:read` (UNVERIFIED; confirm during the spike).
+  - API methods: `slackLists.download.start`, `slackLists.download.get`.
+  - Files to touch: `src/tools/lists.ts`, README.
+  - Depends on: L-09 (shares `lists.ts`).
+  - Acceptance criteria: either the tool ships with a bounded poll (maximum attempts and a timeout) and mocked tests, or the task is checked off with the finding recorded under Explicitly out of scope. Live check under "Live verification pending".
+  - Tests: mocked start → pending → ready; mocked timeout.
+  - Size: M
+
+- [ ] **S-12: Add remote-file read tools — slack_remote_file_info and slack_remote_file_list** — Wrap `files.remote.info` and a paginated `files.remote.list`, so the agent can find remote files it created in earlier turns.
+  - Why: Today the agent can add, update, share and remove remote files, but it can't find them again after the original turn.
+  - Scope(s) & token type: bot token, `remote_files:read` (existing).
+  - API methods: `files.remote.info`, `files.remote.list`.
+  - Files to touch: `src/tools/remote-files.ts`, README.
+  - Depends on: none.
+  - Acceptance criteria: info by `externalId` or `fileId`; list with pagination and a channel filter.
+  - Tests: mocked info; mocked multi-page list.
+  - Size: S
+
+- [ ] **M-14: Post Work Object cards proactively (slack_work_object_post)** — Post a Work Object entity with `chat.postMessage`, using entity metadata and no `app_unfurl_url` (docs.slack.dev/messaging/work-objects-overview, verified 2026-09-26: "call chat.postMessage with entity metadata … rather than responding to a link unfurl"). The card shows a title, display ID, type, status and URL for an external item such as an issue or doc.
+  - Why: A native "linked item" card is richer than a plain link, and needs no `link_shared` event.
+  - Scope(s) & token type: bot token, `chat:write` (existing). Work Objects may need a one-time toggle in the Slack app settings; if so, record it as a manual step.
+  - API methods: `chat.postMessage` with entity metadata.
+  - Fallback: if Slack rejects the entity metadata (Work Objects not enabled, or an invalid entity), post an equivalent plain Block Kit card and return `mode: "fallback"` with the reason.
+  - Files to touch: `src/tools/messaging.ts` or a new `src/tools/work-objects.ts`, README.
+  - Depends on: M-12 (permalink in the result).
+  - Acceptance criteria: a mocked entity post, and a mocked rejection → fallback card. The description notes that clicking the card shows a static placeholder, because only the channel plugin could handle `entity_details_requested`. Live check under "Live verification pending".
+  - Tests: mocked success; mocked rejection → fallback.
+  - Size: M
+
+- [ ] **R-03: Stamp slack_remind with Slack's standard notification metadata** — Scheduled reminders carry `metadata: { event_type: "notification", event_payload: { notification_type: "info", title, urgency, category: "reminder" } }` (docs.slack.dev/messaging/message-metadata), so Slack can surface them in the Activity feed. Other cards keep `openclaw_card`; a message has only one event type.
+  - Why: Reminders are exactly the kind of message that gets lost. This uses Slack's own surfacing mechanism.
+  - Scope(s) & token type: bot token, `chat:write` (existing).
+  - API methods: `chat.scheduleMessage` `metadata`.
+  - Fallback: if Slack rejects the metadata, schedule the reminder without it and note that in the result.
+  - Files to touch: `src/tools/scheduling.ts`, README.
+  - Depends on: none.
+  - Acceptance criteria: a mocked reminder includes the notification metadata, and a rejection falls back to a plain reminder. Whether reminders actually appear in the Activity feed is UNVERIFIED; list it under "Live verification pending".
+  - Tests: mocked metadata payload; mocked rejection fallback.
+  - Size: S
+
+---
+
 ## OpenClaw configuration & Slack app settings — MANUAL (do not run through the automated pipeline)
 
 These are edits to `~/.openclaw/openclaw.json`, the Slack app's own
@@ -1215,6 +1369,15 @@ Recorded 2026-09-23 by the owner:
   auto-joins stay quiet. Live checks passed for C-09, W-01, S-03, M-01/M-02,
   and the D-03 digest pattern (card found by metadata, updated via
   `updateTs`).
+- **2026-09-26: second feature round approved.** Tier 5 adds Real-time Search,
+  the Agent Sessions migration, channel discovery, unarchive, private-channel
+  support, permalinks, message delete, share gating, List update and export,
+  remote-file reads, Work Object cards, and reminder notification metadata.
+  New scopes granted and verified live: user `search:read.public/.private/.im/
+  .mpim/.users`; bot `groups:write`, `groups:write.topic`, `groups:write.invites`.
+  Every scope-dependent feature must degrade gracefully without its scope.
+  Plugin approvals now show in the originating conversation and the owner's DM
+  (`approvals.plugin.mode: "both"`).
 - **Scope-driven extras: channel management and self-joining only.** The
   owner wants channel management (S-01, S-02) and the agent joining public
   channels on its own (S-07, which needs O-12 to add `channels:join`). These
