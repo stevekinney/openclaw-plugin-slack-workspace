@@ -54,3 +54,19 @@ export function assertAccessLevel(target: AccessTarget, accessLevel: AccessLevel
 /** Slack's field names for a target: `channel_ids` or `user_ids`. */
 export const slackAccessTarget = (target: AccessTarget) =>
   "channelIds" in target ? { channel_ids: target.channelIds } : { user_ids: target.userIds };
+
+/** Names an access call's targets for an approval prompt, from raw, unvalidated params. */
+export function describeAccessTargets({ channelIds, userIds }: Record<string, unknown>) {
+  const ids = (value: unknown) => (Array.isArray(value) ? value.map(String) : []);
+  const channels = ids(channelIds);
+  return channels.length ? `channels ${channels.join(", ")}` : `users ${ids(userIds).join(", ")}`;
+}
+
+/**
+ * A grant that reaches beyond individual readers and writers: any channel share (every
+ * member sees it) or `owner` (the grantee can share it further). Revoking either doesn't
+ * un-show what people already saw, so both need approval; user read/write grants don't.
+ */
+export function isWideReachShare({ channelIds, accessLevel }: Record<string, unknown>) {
+  return accessLevel === "owner" || (Array.isArray(channelIds) && channelIds.length > 0);
+}
