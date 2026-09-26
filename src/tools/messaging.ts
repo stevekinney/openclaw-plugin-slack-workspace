@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { Type, type Static } from "typebox";
-import { callSlack, resolveToken, type PluginConfig, type SlackCallContext } from "../client.js";
+import type { ApprovalRule } from "../approvals.js";
+import { authTest, callSlack, resolveToken, type PluginConfig, type SlackCallContext } from "../client.js";
 import { cursorParams, toPage } from "../pagination.js";
 import { resolveChannelId } from "../tool.js";
 import {
@@ -172,6 +173,40 @@ type MetadataMessage = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * Throw unless the message at `ts` was posted by the bot token's own identity. Reads
+ * it back with `conversations.history`, or `conversations.replies` for a thread reply,
+ * and compares its `bot_id`/`user` against `auth.test`. Runs before any delete.
+ */
+async function requireOwnMessage(
+  channelId: string,
+  ts: string,
+  threadTs: string | undefined,
+  token: string,
+  context: SlackCallContext,
+): Promise<void> {
+  const { data: self } = await authTest(token, context);
+  const range = { channel: channelId, oldest: ts, latest: ts, inclusive: true };
+  // conversations.replies always leads with the thread parent, so it gets no limit.
+  const data = threadTs
+    ? await callSlack("conversations.replies", token, { ...range, ts: threadTs }, context, true)
+    : await callSlack("conversations.history", token, { ...range, limit: 1 }, context, true);
+  const messages = Array.isArray(data.messages) ? (data.messages as Record<string, unknown>[]) : [];
+  const message = messages.find((candidate) => candidate.ts === ts);
+  if (!message) {
+    throw new Error(
+      `Message ${ts} was not found in channel ${channelId}${threadTs ? ` thread ${threadTs}` : ""}. If it is a thread reply, pass its parent's ts as threadTs.`,
+    );
+  }
+  const ownBot = typeof self.bot_id === "string" && message.bot_id === self.bot_id;
+  const ownUser = typeof self.user_id === "string" && message.user === self.user_id;
+  if (!ownBot && !ownUser) {
+    throw new Error(
+      `Refusing to delete message ${ts} in channel ${channelId}: it was not posted by this bot. slack_message_delete only removes the bot's own messages.`,
+    );
+  }
+}
 
 /** One message whose metadata matched, curated to what finding and updating it needs. */
 const stampedMessageSchema = Type.Object(
@@ -765,6 +800,33 @@ export const messagingTools = (tool: ToolFactory) => [
   }),
 
   tool({
+    name: "slack_message_delete",
+    label: "Delete Slack message",
+    description:
+      "Delete a message this bot posted, e.g. a scratch or obsolete card. Irreversible, so it waits for a human's approval. Refuses any message another user or app posted: the tool reads the message back first and checks its author. For a thread reply, pass the parent's `threadTs`.",
+    parameters: Type.Object({
+      channelId: activeChannelIdParam("The channel the message lives in."),
+      ts: Type.String({ description: "Timestamp of the message to delete, e.g. from slack_blocks_send or slack_message_get." }),
+      threadTs: Type.Optional(
+        Type.String({ description: "The thread parent's ts, when the message is a thread reply." }),
+      ),
+    }),
+    outputSchema: Type.Object(
+      { deleted: Type.Literal(true), channelId: Type.String(), ts: Type.String() },
+      { additionalProperties: false },
+    ),
+    async execute({ channelId: explicitChannelId, ts, threadTs }, config, context) {
+      context.signal?.throwIfAborted();
+      const channelId = resolveChannelId(explicitChannelId, context);
+      const token = resolveToken(config, "bot");
+      await requireOwnMessage(channelId, ts, threadTs, token, context);
+      context.signal?.throwIfAborted();
+      await callSlack("chat.delete", token, { channel: channelId, ts }, context);
+      return { deleted: true, channelId, ts };
+    },
+  }),
+
+  tool({
     name: "slack_post_ephemeral",
     label: "Post Slack ephemeral message",
     description:
@@ -805,4 +867,16 @@ export const messagingTools = (tool: ToolFactory) => [
       return { channelId, userId, ephemeralTs: data.message_ts };
     },
   }),
+];
+
+/** Deleting a message can't be undone, so every delete waits for a human. */
+export const messagingApprovals: ApprovalRule[] = [
+  {
+    toolName: "slack_message_delete",
+    check: ({ channelId, ts }) => ({
+      title: "Delete Slack message",
+      description: `Delete message ${ts} in channel ${channelId}. This can't be undone. The tool refuses messages this bot didn't post.`,
+      target: `channel ${channelId}`,
+    }),
+  },
 ];

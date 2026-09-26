@@ -77,6 +77,7 @@ const gatedMultiCall: Array<[string, Record<string, unknown>]> = [
     { channelId: "C0TEST", scheduledMessageId: "Q0TEST", text: "moved", postAt: "2030-01-01T09:00:00Z" },
   ],
   ["slack_canvas_status_update", { channelId: "C0TEST", heading: "Status", markdown: "All green" }],
+  ["slack_message_delete", { channelId: "C0TEST", ts: "1726000000.000100" }],
 ];
 
 describe("approval registry", () => {
@@ -94,6 +95,7 @@ describe("approval registry", () => {
       "slack_list_access_delete",
       "slack_list_item_delete",
       "slack_list_items_delete_multiple",
+      "slack_message_delete",
       "slack_remote_file_remove",
       "slack_schedule_reschedule",
       "slack_scheduled_cancel",

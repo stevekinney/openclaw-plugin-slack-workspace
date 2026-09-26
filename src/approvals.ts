@@ -2,6 +2,7 @@ import { bookmarkApprovals } from "./tools/bookmarks.js";
 import { canvasApprovals } from "./tools/canvases.js";
 import { channelApprovals } from "./tools/channels.js";
 import { listApprovals } from "./tools/lists.js";
+import { messagingApprovals } from "./tools/messaging.js";
 import { remoteFileApprovals } from "./tools/remote-files.js";
 import { schedulingApprovals } from "./tools/scheduling.js";
 
@@ -52,6 +53,7 @@ export const APPROVAL_RULES: readonly ApprovalRule[] = [
   ...channelApprovals,
   ...listApprovals,
   ...remoteFileApprovals,
+  ...messagingApprovals,
 ];
 
 /**

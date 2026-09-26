@@ -27,11 +27,14 @@ Tools marked † take an optional `channelId`. Inside a Slack conversation, leav
 | `slack_blocks_send` † | Post raw Block Kit blocks | bot | `chat:write` |
 | `slack_blocks_update` † | Replace an existing message's blocks by `ts` | bot | `chat:write` |
 | `slack_message_get` † | Find messages by the metadata stamped on them and return their `ts` | bot | `channels:history`, `metadata.message:read` |
+| `slack_message_delete` † | Delete a message this bot posted (approval-gated) | bot | `channels:history`, `chat:write` |
 | `slack_post_ephemeral` † | Send one user a message only they can see | bot | `chat:write` |
 
 `slack_post_table`, `slack_post_plan`, `slack_post_chart`, and `slack_post_rich_text` also take `updateTs` to rewrite a message they posted earlier.
 
 After posting or updating, those four tools and `slack_blocks_send`/`slack_blocks_update` call `chat.getPermalink` and return the message's `permalink`, so the agent can link to what it posted. If the lookup fails, the post still succeeds: the result just omits `permalink` and a warning is logged.
+
+`slack_message_delete` wraps `chat.delete` so the agent can clean up its own scratch or obsolete cards. Before deleting, it reads the message back with `conversations.history`, or `conversations.replies` when you pass the thread parent's `threadTs`, and compares its author with the bot's `auth.test` identity. If another user or app posted the message, or the message can't be found, the tool refuses the call and never reaches `chat.delete`. Deleting is irreversible, so every call also waits for a human's approval.
 
 ### Scheduling and reminders
 
@@ -120,7 +123,7 @@ After posting or updating, those four tools and `slack_blocks_send`/`slack_block
 | `slack_usergroup_members` | List a user group's members (read-only) | bot | `usergroups:read` |
 | `slack_workflow_trigger_run` | Start a Workflow Builder workflow through a configured webhook trigger | none | none |
 
-Tools that read a channel's history (`slack_message_get`, `slack_canvas_from_thread`, `slack_list_from_thread`) need the history scope for the conversation's type: `channels:history` for public channels, `groups:history` for private ones, and `im:history` or `mpim:history` for DMs and group DMs.
+Tools that read a channel's history (`slack_message_get`, `slack_message_delete`, `slack_canvas_from_thread`, `slack_list_from_thread`) need the history scope for the conversation's type: `channels:history` for public channels, `groups:history` for private ones, and `im:history` or `mpim:history` for DMs and group DMs.
 
 ## Configuration
 
@@ -178,7 +181,7 @@ The plugin ships three agent skills in `skills/`, which teach the agent when and
 
 ## Approvals
 
-A `before_tool_call` hook asks a human to approve destructive calls before they reach Slack: `slack_canvas_edit` with `operation: "replace"` or `"delete"`, `slack_canvas_delete`, `slack_bookmark_remove`, `slack_scheduled_cancel`, `slack_channel_archive`, `slack_channel_unarchive`, `slack_channel_rename`, `slack_list_item_delete`, `slack_list_items_delete_multiple`, `slack_remote_file_remove`, and every `slack_channel_kickoff`. Reviewers get `allow-once` or `deny` only; the plugin doesn't persist trust, so it never offers `allow-always`. The rules live in `src/approvals.ts`. When you add an irreversible or disruptive tool, register its rule there in the same change. `slack_canvas_status_update` is exempt on purpose: it exists for unattended scheduled runs, and it only ever rewrites the one section under its own heading, refusing a heading that matches more than one section.
+A `before_tool_call` hook asks a human to approve destructive calls before they reach Slack: `slack_canvas_edit` with `operation: "replace"` or `"delete"`, `slack_canvas_delete`, `slack_bookmark_remove`, `slack_scheduled_cancel`, `slack_channel_archive`, `slack_channel_unarchive`, `slack_channel_rename`, `slack_list_item_delete`, `slack_list_items_delete_multiple`, `slack_remote_file_remove`, `slack_message_delete`, and every `slack_channel_kickoff`. Reviewers get `allow-once` or `deny` only; the plugin doesn't persist trust, so it never offers `allow-always`. The rules live in `src/approvals.ts`. When you add an irreversible or disruptive tool, register its rule there in the same change. `slack_canvas_status_update` is exempt on purpose: it exists for unattended scheduled runs, and it only ever rewrites the one section under its own heading, refusing a heading that matches more than one section.
 
 Archive, unarchive, and rename also require an explicit `confirm: true` argument. The schema has no default for it, and the tool refuses the call before contacting Slack without it. That guard still holds in cron jobs and other automation where no one is around to approve.
 

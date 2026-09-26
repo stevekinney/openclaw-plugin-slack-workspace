@@ -173,6 +173,7 @@
       "slack_blocks_send",
       "slack_blocks_update",
       "slack_message_get",
+      "slack_message_delete",
       "slack_post_ephemeral",
       "slack_canvas_create",
       "slack_canvas_edit",
@@ -325,6 +326,13 @@
     "slack_message_get": {
       "sideEffecting": false,
       "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_message_delete": {
+      "sideEffecting": true,
+      "replaySafe": false,
       "profiles": [
         "messaging"
       ]
