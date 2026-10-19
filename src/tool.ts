@@ -5,6 +5,7 @@ import type {
   OpenClawPluginToolContext,
 } from "openclaw/plugin-sdk/plugin-entry";
 import { jsonResult, textResult } from "openclaw/plugin-sdk/tool-results";
+import { resolveConfiguredSecretInputString } from "openclaw/plugin-sdk/secret-input-runtime";
 import type { AutoJoinState, PluginConfig } from "./client.js";
 
 /** What a tool's `execute` receives besides its parameters and the plugin config. */
@@ -96,6 +97,43 @@ function withAutoJoined(result: unknown, autoJoin: AutoJoinState): unknown {
 
 export type ToolFactory = typeof defineTool;
 
+type SecretResolver = typeof resolveConfiguredSecretInputString;
+
+/** Plugin config is authored config, not the prepared Gateway snapshot. Resolve only
+ * configured refs at execution time; never retain a resolved credential globally. */
+export async function resolveToolConfig(
+  config: PluginConfig,
+  hostConfig: OpenClawPluginApi["config"],
+  resolve: SecretResolver = resolveConfiguredSecretInputString,
+): Promise<PluginConfig> {
+  const resolved: PluginConfig = { ...config };
+  for (const field of ["botToken", "userToken"] as const) {
+    const value = config[field];
+    if (!value || typeof value === "string") continue;
+    const result = await resolve({
+      config: hostConfig,
+      env: process.env,
+      value,
+      path: `plugins.entries.slack-workspace.config.${field}`,
+    });
+    if (result.value) resolved[field] = result.value;
+  }
+  if (config.workflowTriggers) {
+    resolved.workflowTriggers = { ...config.workflowTriggers };
+    for (const [name, value] of Object.entries(config.workflowTriggers)) {
+      if (typeof value === "string") continue;
+      const result = await resolve({
+        config: hostConfig,
+        env: process.env,
+        value,
+        path: `plugins.entries.slack-workspace.config.workflowTriggers.${name}`,
+      });
+      if (result.value) resolved.workflowTriggers[name] = result.value;
+    }
+  }
+  return resolved;
+}
+
 /**
  * Register each tool with `api.registerTool`, wrapping its result the way the host expects.
  * Each is a factory so it sees the active turn (see `ToolContext.activeChannelId`).
@@ -113,9 +151,10 @@ export function registerTools(api: OpenClawPluginApi, tools: readonly ToolDefini
           parameters: tool.parameters,
           ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
           execute: async (toolCallId, params, signal, onUpdate) => {
-            const autoJoin: AutoJoinState = { config, joined: new Set() };
+            const executionConfig = await resolveToolConfig(config, api.config ?? {});
+            const autoJoin: AutoJoinState = { config: executionConfig, joined: new Set() };
             const result = withAutoJoined(
-              await tool.execute(params as Static<TSchema>, config, {
+              await tool.execute(params as Static<TSchema>, executionConfig, {
                 api,
                 signal,
                 toolCallId,
