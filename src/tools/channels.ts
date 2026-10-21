@@ -352,7 +352,7 @@ export const channelTools = (tool: ToolFactory) => [
     name: "slack_channel_rename",
     label: "Rename Slack channel",
     description:
-      "Rename a Slack channel: public, or private if the bot is a member. Disruptive: links and habits built on the old name break. Requires `confirm: true` and a human's approval.",
+      "Rename a Slack channel: public, or private if the bot is a member. Requires `confirm: true`.",
     parameters: Type.Object({
       channelId: memberChannelIdParam(),
       name: channelNameParam("New channel name, following Slack's naming rules; at most 80 characters."),
@@ -652,8 +652,9 @@ export const channelTools = (tool: ToolFactory) => [
 
 /**
  * Archive hides a channel from every member's sidebar; unarchive brings it back for the
- * whole workspace; rename breaks links and habits built on the old name. All three wait
- * for a human, on top of the schema's `confirm: true`.
+ * whole workspace. Both wait for a human, on top of the schema's `confirm: true`.
+ * Rename is reversible and uses the explicit `confirm: true` guard without a second
+ * asynchronous approval that can outlive the tool call.
  */
 export const channelApprovals: ApprovalRule[] = [
   {
@@ -669,14 +670,6 @@ export const channelApprovals: ApprovalRule[] = [
     check: ({ channelId }) => ({
       title: "Unarchive Slack channel",
       description: `Unarchive channel ${channelId}. It becomes visible again across the workspace, in search and the channel browser.`,
-      target: `channel ${channelId}`,
-    }),
-  },
-  {
-    toolName: "slack_channel_rename",
-    check: ({ channelId, name }) => ({
-      title: "Rename Slack channel",
-      description: `Rename channel ${channelId} to #${name}. Links and references to the old name stop matching.`,
       target: `channel ${channelId}`,
     }),
   },

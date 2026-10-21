@@ -238,13 +238,17 @@ describe("confirm guard on archive, unarchive, and rename", () => {
   });
 });
 
-describe("private channels keep the archive and rename guards", () => {
+describe("private channels keep the confirmation guard", () => {
   it.each([
     ["slack_channel_archive", { channelId: "C0PRIV" }],
     ["slack_channel_unarchive", { channelId: "C0PRIV" }],
     ["slack_channel_rename", { channelId: "C0PRIV", name: "renamed" }],
-  ])("%s needs confirm: true and an approval", async (name, params) => {
-    expect(approvalFor(name, { ...params, confirm: true })?.scope.target).toBe("channel C0PRIV");
+  ])("%s needs confirm: true", async (name, params) => {
+    if (name === "slack_channel_rename") {
+      expect(approvalFor(name, { ...params, confirm: true })).toBeUndefined();
+    } else {
+      expect(approvalFor(name, { ...params, confirm: true })?.scope.target).toBe("channel C0PRIV");
+    }
     await withMockFetch(
       () => ({ ok: true, channel: PRIVATE }),
       async (calls) => {
@@ -256,7 +260,7 @@ describe("private channels keep the archive and rename guards", () => {
 });
 
 describe("channel approvals", () => {
-  it("gates archive, unarchive, and rename, naming the channel", () => {
+  it("gates archive and unarchive, naming the channel", () => {
     expect(
       approvalFor("slack_channel_archive", { channelId: "C0TEST", confirm: true }),
     ).toMatchObject({
@@ -271,17 +275,11 @@ describe("channel approvals", () => {
       scope: { kind: "external-post", target: "channel C0TEST" },
       allowedDecisions: ["allow-once", "deny"],
     });
-    const rename = approvalFor("slack_channel_rename", {
-      channelId: "C0TEST",
-      name: "renamed",
-      confirm: true,
-    });
-    expect(rename).toMatchObject({ scope: { target: "channel C0TEST" } });
-    expect(rename?.description).toContain("#renamed");
   });
 
   it.each([
     ["slack_channel_create", { name: "launch" }],
+    ["slack_channel_rename", { channelId: "C0TEST", name: "renamed", confirm: true }],
     ["slack_channel_set_topic", { channelId: "C0TEST", topic: "t" }],
     ["slack_channel_set_purpose", { channelId: "C0TEST", purpose: "p" }],
     ["slack_channel_invite", { channelId: "C0TEST", userIds: ["U0A"] }],

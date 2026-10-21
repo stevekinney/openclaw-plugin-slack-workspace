@@ -53,11 +53,6 @@ const gated: Array<[string, Record<string, unknown>, string]> = [
   ],
   ["slack_channel_archive", { channelId: "C0TEST", confirm: true }, "conversations.archive"],
   ["slack_channel_unarchive", { channelId: "C0TEST", confirm: true }, "conversations.unarchive"],
-  [
-    "slack_channel_rename",
-    { channelId: "C0TEST", name: "renamed", confirm: true },
-    "conversations.rename",
-  ],
   ["slack_channel_kickoff", { name: "launch" }, "conversations.create"],
   ["slack_list_item_delete", { listId: "F0LIST", itemId: "Rec0A" }, "slackLists.items.delete"],
   [
@@ -119,7 +114,6 @@ describe("approval registry", () => {
       "slack_canvas_status_update",
       "slack_channel_archive",
       "slack_channel_kickoff",
-      "slack_channel_rename",
       "slack_channel_unarchive",
       "slack_list_access_delete",
       "slack_list_access_set",
@@ -307,6 +301,22 @@ describe("before_tool_call approvals", () => {
         expect(approval).toBeUndefined();
         expect(executed).toBe(true);
         expect(writes(calls)).toEqual([method]);
+      },
+    );
+  });
+
+  it("lets a confirmed channel rename through without a second approval", async () => {
+    await withMockFetch(
+      () => slackResponse({ ok: true, channel: { id: "C0TEST", name: "renamed" } }),
+      async (calls) => {
+        const { approval, executed } = await callWithApproval(
+          "slack_channel_rename",
+          { channelId: "C0TEST", name: "renamed", confirm: true },
+          "deny",
+        );
+        expect(approval).toBeUndefined();
+        expect(executed).toBe(true);
+        expect(writes(calls)).toEqual(["conversations.rename"]);
       },
     );
   });
