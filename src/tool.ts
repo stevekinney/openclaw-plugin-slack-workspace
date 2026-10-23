@@ -6,7 +6,8 @@ import type {
 } from "openclaw/plugin-sdk/plugin-entry";
 import { jsonResult, textResult } from "openclaw/plugin-sdk/tool-results";
 import { resolveConfiguredSecretInputString } from "openclaw/plugin-sdk/secret-input-runtime";
-import type { AutoJoinState, PluginConfig } from "./client.js";
+import type { AutoJoinState, PluginConfig, SlackCallContext, SlackResponse } from "./client.js";
+import type { InteractionPreparation, PreparedInteraction } from "./interactions.js";
 
 /** What a tool's `execute` receives besides its parameters and the plugin config. */
 export type ToolContext = {
@@ -25,6 +26,9 @@ export type ToolContext = {
    * `nativeChannelId`. Unset outside a Slack turn (cron, automations, other channels).
    */
   activeChannelId?: string;
+  onSlackResponse?: SlackCallContext["onSlackResponse"];
+  prepareSlackRequest?: SlackCallContext["prepareSlackRequest"];
+  prepareInteraction?: (input: InteractionPreparation) => Promise<PreparedInteraction>;
 };
 
 /**
@@ -138,7 +142,32 @@ export async function resolveToolConfig(
  * Register each tool with `api.registerTool`, wrapping its result the way the host expects.
  * Each is a factory so it sees the active turn (see `ToolContext.activeChannelId`).
  */
-export function registerTools(api: OpenClawPluginApi, tools: readonly ToolDefinition[]): void {
+export type ToolIntegrations = {
+  observeResponse?: (
+    context: OpenClawPluginToolContext,
+    method: string,
+    body: Record<string, unknown>,
+    response: SlackResponse,
+    configuration: PluginConfig,
+  ) => Promise<void>;
+  prepareRequest?: (
+    context: OpenClawPluginToolContext,
+    method: string,
+    body: Record<string, unknown>,
+    configuration: PluginConfig,
+  ) => Promise<Record<string, unknown>>;
+  prepareInteraction?: (
+    context: OpenClawPluginToolContext,
+    input: InteractionPreparation,
+    configuration: PluginConfig,
+  ) => Promise<PreparedInteraction>;
+};
+
+export function registerTools(
+  api: OpenClawPluginApi,
+  tools: readonly ToolDefinition[],
+  integrations: ToolIntegrations = {},
+): void {
   const config = (api.pluginConfig ?? {}) as PluginConfig;
   for (const tool of tools) {
     api.registerTool(
@@ -153,6 +182,7 @@ export function registerTools(api: OpenClawPluginApi, tools: readonly ToolDefini
           execute: async (toolCallId, params, signal, onUpdate) => {
             const executionConfig = await resolveToolConfig(config, api.config ?? {});
             const autoJoin: AutoJoinState = { config: executionConfig, joined: new Set() };
+            let routingWarning = false;
             const result = withAutoJoined(
               await tool.execute(params as Static<TSchema>, executionConfig, {
                 api,
@@ -160,11 +190,25 @@ export function registerTools(api: OpenClawPluginApi, tools: readonly ToolDefini
                 toolCallId,
                 onUpdate,
                 autoJoin,
+                ...(integrations.observeResponse ? {
+                  onSlackResponse: async (method: string, body: Record<string, unknown>, response: SlackResponse) => {
+                    try {
+                      await integrations.observeResponse!(ctx, method, body, response, executionConfig);
+                    } catch {
+                      routingWarning = true;
+                      api.logger.warn("slack-workspace: Slack committed an operation but routing bookkeeping failed; do not repeat the operation.");
+                    }
+                  },
+                } : {}),
+                ...(integrations.prepareRequest ? { prepareSlackRequest: (method: string, body: Record<string, unknown>) => integrations.prepareRequest!(ctx, method, body, executionConfig) } : {}),
+                ...(integrations.prepareInteraction ? { prepareInteraction: (input: InteractionPreparation) => integrations.prepareInteraction!(ctx, input, executionConfig) } : {}),
                 ...(activeChannelId ? { activeChannelId } : {}),
               }),
               autoJoin,
             );
-            return typeof result === "string" ? textResult(result, result) : jsonResult(result);
+            const output = typeof result === "string" ? textResult(result, result) : jsonResult(result);
+            if (routingWarning) output.content.push({ type: "text", text: "Slack committed the operation, but its reply-routing association could not be saved. Do not resend or repeat the operation." });
+            return output;
           },
         };
       },

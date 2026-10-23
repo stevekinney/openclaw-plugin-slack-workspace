@@ -1,5 +1,24 @@
 # Block Kit block types — verified against live Slack (Lost Gradient, 2026-09-22)
 
+## Native interactions
+
+Use `slack_interaction_prepare` for plugin-owned modal buttons and external
+select options. It returns an opaque `actionId`, `reference`, and `expiresAt`;
+the host owns the callback acknowledgement, actor checks, and live session
+generation check. Do not put session IDs, trigger IDs, response URLs, or
+credentials in a block value or modal metadata. Prepared modal metadata is
+owned by the host and must not be supplied by the caller.
+
+Slack modal titles, submit labels, and close labels use `plain_text` and are at
+most 24 characters. A modal has at most 100 blocks. External select options are
+bounded to 100 entries, with labels at most 75 characters and values at most
+150 characters. Option filtering is literal and synchronous; selected values
+are routed as a normal interaction event.
+
+Scheduled routed messages carry an opaque footer marker in one block because
+Slack does not post scheduled messages containing message metadata. Leave room
+for that marker: routed scheduled messages allow at most 49 content blocks.
+
 Reference: https://docs.slack.dev/reference/block-kit/blocks (21 block types)
 
 Tested by posting through `slack_blocks_send`. "Posts" = Slack accepted it in a DM.

@@ -139,10 +139,26 @@ Verified to render in messages: `header`, `section` (with `fields`), `rich_text`
 
 `alert` is **modals only** and will not render in a message.
 
-To let a user rate an answer 👍/👎, add a `context_actions` block with
-`feedback_buttons` under it. The JSON is under "Feedback buttons" in
-`references/block-kit.md`. It hasn't been live-verified yet, and this plugin
-doesn't receive the clicks.
+To let a user rate an answer, add a `context_actions` block with `feedback_buttons` under it. The JSON is under “Feedback buttons” in `references/block-kit.md`. Ordinary message controls route through the native handler using the card's recorded origin. Authored button values never establish session ownership.
+
+## Prepared interactions
+
+`slack_interaction_prepare` prepares two bounded callback types:
+
+- `kind: "modal"`: pass a Slack modal view with a `plain_text` title and up to 100 blocks. Put the returned `actionId` on a button. The native host opens the modal during the callback and keeps the trigger ID out of model context.
+- `kind: "options"`: pass up to 100 options for an external select. Labels are limited to 75 characters and values to 150 characters. The native host filters these literal options synchronously; it does not start an agent turn for each keystroke.
+
+The tool returns `{ actionId, reference, expiresAt }`. The host validates the authorized actor, account, workspace, conversation, and live session generation before opening the modal or routing a submission. Expired controls receive an ephemeral explanation. Native approvals continue through the host approval path. Routing must be enabled on the companion host described in the README.
+
+For a form, prepare the view first:
+
+```json
+{"kind":"modal","view":{"type":"modal","title":{"type":"plain_text","text":"Review"},"submit":{"type":"plain_text","text":"Send"},"blocks":[{"type":"input","block_id":"feedback","label":{"type":"plain_text","text":"Feedback"},"element":{"type":"plain_text_input","action_id":"comment","multiline":true}}]}}
+```
+
+Then use the returned `actionId` as the button's `action_id` in `slack_blocks_send`. Do not set the view's `callback_id` or `private_metadata`; the tool owns them. Use a button for a single choice, a select for a short set of choices, and a modal when several fields belong together. Provide fallback `text` on the message for notifications and screen readers, and update the original card after processing the response.
+
+Scheduled messages use an opaque footer block for routing because Slack refuses to post scheduled messages that contain message metadata. That footer consumes one block, leaving room for at most 49 content blocks.
 
 Two that differ from expectation:
 

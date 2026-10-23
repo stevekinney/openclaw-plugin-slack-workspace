@@ -18,6 +18,7 @@ const idempotentWrite: ToolMetadata = { ...write, replaySafe: true };
 
 export const TOOL_METADATA: Record<string, ToolMetadata> = {
   slack_identity: read,
+  slack_interaction_prepare: write,
   slack_search: read,
   slack_search_context: read,
   slack_schedule_message: write,

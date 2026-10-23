@@ -11,6 +11,7 @@ export type PluginConfig = {
   autoJoin?: boolean;
   /** Channel IDs never to auto-join. */
   autoJoinDeny?: string[];
+  routing?: import("./routing-configuration.js").RoutingConfigurationInput;
 };
 
 /**
@@ -77,6 +78,13 @@ export type SlackCallContext = {
   api?: { logger?: PluginLogger };
   /** Set by the tool runner; without it, `not_in_channel` is never auto-joined. */
   autoJoin?: AutoJoinState;
+  /** Observe committed Slack responses before enrichment or cancellation can hide a send. */
+  onSlackResponse?: (
+    method: string,
+    body: Record<string, unknown>,
+    response: SlackResponse,
+  ) => Promise<void>;
+  prepareSlackRequest?: (method: string, body: Record<string, unknown>) => Promise<Record<string, unknown>>;
 };
 
 /** A Slack API error, keeping Slack's bare error code alongside the readable message. */
@@ -155,6 +163,7 @@ export async function callSlackRaw(
   context: SlackCallContext = {},
   form = false,
 ): Promise<{ data: SlackResponse; scopes: string[] }> {
+  body = await context.prepareSlackRequest?.(method, body) ?? body;
   try {
     return await callSlackOnce(method, token, body, context, form);
   } catch (error) {
@@ -357,6 +366,7 @@ async function callSlackOnce(
       throw new SlackApiError(`Slack ${method} failed: ${error}${hint}`, error);
     }
 
+    await context.onSlackResponse?.(method, body, data);
     log("ok");
     const scopes = (response.headers.get("x-oauth-scopes") ?? "")
       .split(",")
@@ -391,7 +401,7 @@ export async function authTest(
 }
 
 /** The workspace a token belongs to: its web origin and team id. */
-export type Workspace = { origin: string; teamId: string };
+export type Workspace = { origin: string; teamId: string; userId?: string };
 
 /** One `auth.test` per token per process; `slack_identity` primes this too. */
 const workspaces = new Map<string, Promise<Workspace | null>>();
@@ -399,7 +409,9 @@ const workspaces = new Map<string, Promise<Workspace | null>>();
 function workspaceFromAuthTest(data: SlackResponse): Workspace | null {
   if (typeof data.url !== "string" || typeof data.team_id !== "string") return null;
   try {
-    return { origin: new URL(data.url).origin, teamId: data.team_id };
+    return { origin: new URL(data.url).origin, teamId: data.team_id,
+      ...(typeof data.user_id === "string" ? { userId: data.user_id } : {}),
+    };
   } catch {
     return null;
   }

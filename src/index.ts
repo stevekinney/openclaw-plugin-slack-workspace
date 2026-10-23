@@ -7,6 +7,7 @@ import type { TSchema } from "typebox";
 import { registerDoctorCli } from "./doctor.js";
 import { beforeToolCall } from "./hooks.js";
 import { configSchema } from "./schemas.js";
+import { registerRouting } from "./routing.js";
 import { registerTools } from "./tool.js";
 import { tools } from "./tools/index.js";
 
@@ -25,7 +26,7 @@ const entry = definePluginEntry({
   description,
   configSchema: pluginConfigSchema,
   register(api) {
-    registerTools(api, tools);
+    registerTools(api, tools, registerRouting(api));
     const [first, ...rest] = tools.map((tool) => tool.name);
     api.on("before_tool_call", beforeToolCall, { matcher: [first, ...rest] });
     registerDoctorCli(api);

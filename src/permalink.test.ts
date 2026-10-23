@@ -35,6 +35,7 @@ describe("permalinks from posting tools", () => {
       const lookup = calls.find((call) => call.method === "chat.getPermalink");
       expect(lookup?.body).toEqual({ channel: "C0TEAM", message_ts: "1726000000.000100" });
       expect(lookup?.headers.authorization).toBe("Bearer xoxb-test");
+      expect(lookup?.headers["content-type"]).toBe("application/x-www-form-urlencoded; charset=utf-8");
       expect(result.permalink).toBe(PERMALINK);
       expect(result.ts).toBe("1726000000.000100");
     });

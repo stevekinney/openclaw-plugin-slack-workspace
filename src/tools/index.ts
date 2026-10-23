@@ -5,6 +5,7 @@ import { canvasTools } from "./canvases.js";
 import { channelTools } from "./channels.js";
 import { fileTools } from "./files.js";
 import { identityTools } from "./identity.js";
+import { interactionTools } from "./interactions.js";
 import { listTools } from "./lists.js";
 import { messagingTools } from "./messaging.js";
 import { schedulingTools } from "./scheduling.js";
@@ -28,4 +29,5 @@ export const tools = [
   ...workflowTools(defineTool),
   ...usergroupTools(defineTool),
   ...remoteFileTools(defineTool),
+  ...interactionTools(defineTool),
 ];

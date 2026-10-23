@@ -1,0 +1,2642 @@
+diff --git a/docs/plugins/hooks/messages.md b/docs/plugins/hooks/messages.md
+index f56041d72..368f39228 100644
+--- a/docs/plugins/hooks/messages.md
++++ b/docs/plugins/hooks/messages.md
+@@ -10,6 +10,18 @@ sidebarTitle: "Messages"
+ 
+ Inbound interception, reply takeover, and outbound delivery policy. Part of the [Plugin hooks](/plugins/hooks) guide.
+ 
++## Select an existing inbound session
++
++Hosts exposing `api.runtime.channel.routing.inboundRouteContractVersion === 1` call `resolve_inbound_route` after provider authorization and before session admission. Slack uses this seam for ordinary messages and routed interaction system events. Return `undefined` to retain the native route, `{ agentId, sessionKey, expectedSessionId, reason? }` to select a concrete existing session, or `{ drop: { reason } }` to stop delivery. A drop is terminal; expired controls must not fall through to another session.
++
++The event includes the admitted `channel`, `accountId`, `workspaceId`, `conversationId`, `senderId`, `messageId`, `content`, and `isDirect`, plus the default `agentId`/`sessionKey`. Optional `replyToId`, `threadId`, `signal`, and `interaction` fields describe explicit references and interactive callbacks. Interaction facts can include `kind`, `messageTs`, `actionId`, `viewId`, `callbackId`, `reference`, and `privateMetadata`. Treat message text and callback data as untrusted evidence. Honor the cancellation signal and keep classification bounded.
++
++`expectedSessionId` identifies the exact lifecycle generation, not a session key alias. The host guards metadata recording and actual agent admission against archive, deletion, and reset. Routing preserves the native attachment, transcript, queue, and source reply delivery paths. It does not grant the caller new sender authorization.
++
++For outbound correlation, `message_sent` contexts may include trusted `agentId`, `sessionKey`, `sessionId`, `workspaceId`, and `conversationId`. `ctx.channelId` remains the provider name, such as `slack`; `ctx.conversationId` is the provider-confirmed Slack conversation. Slack emits an observation for each identified message in aggregate receipts, including committed chunks preceding a later send failure. Identity fields remain optional for sends without an originating session. Never reconstruct a concrete generation from a reused session key after delivery.
++
++Slack plugin interactive handlers receive `interaction.kind: "options"` for external-select suggestions and `interaction.query` from Slack's `block_suggestion.value`. Answer using `respond.options` or `respond.acknowledge` synchronously. Each request needs its own response, including repeated queries. Prepared modals can use `respond.openModal` during a button callback; trigger credentials stay inside the host handler. Native approval controls retain their own policy.
++
+ ## Message hooks
+ 
+ For inbound interception, `before_dispatch` receives the incoming message
+diff --git a/extensions/slack/src/installation-identity-state.test.ts b/extensions/slack/src/installation-identity-state.test.ts
+new file mode 100644
+index 000000000..236690631
+--- /dev/null
++++ b/extensions/slack/src/installation-identity-state.test.ts
+@@ -0,0 +1,35 @@
++import { afterEach, describe, expect, it } from "vitest";
++import {
++  getSlackInstallationWorkspaceId,
++  registerSlackInstallationState,
++} from "./installation-identity-state.js";
++
++const accountId = `identity-test-${Math.random().toString(36).slice(2)}`;
++
++describe("Slack installation identity workspace provenance", () => {
++  const registrations: Array<{ release: () => void }> = [];
++
++  afterEach(() => {
++    for (const registration of registrations.splice(0)) {
++      registration.release();
++    }
++  });
++
++  it("retains workspace team identity and clears it for enterprise updates", () => {
++    const registration = registerSlackInstallationState(accountId, "workspace", "T123");
++    registrations.push(registration);
++    expect(getSlackInstallationWorkspaceId(accountId)).toBe("T123");
++
++    registration.update("enterprise");
++    expect(getSlackInstallationWorkspaceId(accountId)).toBeUndefined();
++  });
++
++  it("does not let a released owner remove a replacement registration", () => {
++    const first = registerSlackInstallationState(accountId, "workspace", "T111");
++    const second = registerSlackInstallationState(accountId, "workspace", "T222");
++    registrations.push(second);
++
++    first.release();
++    expect(getSlackInstallationWorkspaceId(accountId)).toBe("T222");
++  });
++});
+diff --git a/extensions/slack/src/installation-identity-state.ts b/extensions/slack/src/installation-identity-state.ts
+index 5d10ae91d..3e773ecf4 100644
+--- a/extensions/slack/src/installation-identity-state.ts
++++ b/extensions/slack/src/installation-identity-state.ts
+@@ -55,6 +55,8 @@ export function getSlackInstallationTeamId(accountId: string): string | undefine
+   return state?.kind === "workspace" ? state.teamId : undefined;
+ }
+ 
++export const getSlackInstallationWorkspaceId = getSlackInstallationTeamId;
++
+ export function isSlackWorkspaceInstallation(accountId: string): boolean {
+   return getSlackInstallationKind(accountId) === "workspace";
+ }
+diff --git a/extensions/slack/src/interactive-dispatch.ts b/extensions/slack/src/interactive-dispatch.ts
+index ae2251aa6..77dd28cd0 100644
+--- a/extensions/slack/src/interactive-dispatch.ts
++++ b/extensions/slack/src/interactive-dispatch.ts
+@@ -1,3 +1,5 @@
++import type { ViewResponseAction } from "@slack/bolt";
++import type { View } from "@slack/types";
+ import {
+   createChannelInteractiveDispatcher,
+   type PluginConversationBinding,
+@@ -17,7 +19,7 @@ type SlackInteractiveHandlerResult = {
+ } | void;
+ 
+ type SlackBlockInteractivePayload = {
+-  kind: "button" | "select";
++  kind: "button" | "select" | "options";
+   data: string;
+   namespace: string;
+   payload: string;
+@@ -30,6 +32,11 @@ type SlackBlockInteractivePayload = {
+   selectedLabels?: string[];
+   triggerId?: string;
+   responseUrl?: string;
++  query?: string;
++  viewId?: string;
++  callbackId?: string;
++  privateMetadata?: string;
++  reference?: string;
+ };
+ 
+ type SlackModalInteractivePayload = {
+@@ -52,6 +59,7 @@ type SlackModalInteractivePayload = {
+ export type SlackInteractiveHandlerContext = {
+   channel: "slack";
+   accountId: string;
++  workspaceId: string;
+   interactionId: string;
+   conversationId: string;
+   parentConversationId?: string;
+@@ -63,7 +71,11 @@ export type SlackInteractiveHandlerContext = {
+   };
+   interaction: SlackBlockInteractivePayload | SlackModalInteractivePayload;
+   respond: {
+-    acknowledge: () => Promise<void>;
++    acknowledge: (response?: ViewResponseAction) => Promise<void>;
++    openModal: (view: View) => Promise<unknown>;
++    options: (
++      options: Array<{ text: { type: "plain_text"; text: string }; value: string }>,
++    ) => Promise<void>;
+     reply: (params: { text: string; responseType?: "ephemeral" | "in_channel" }) => Promise<void>;
+     followUp: (params: {
+       text: string;
+@@ -121,6 +133,10 @@ export async function dispatchSlackPluginInteractiveHandler(params: {
+ 
+   return await dispatchSlackInteractive({
+     ...params,
++    ctx: {
++      ...params.ctx,
++      workspaceId: params.ctx.workspaceId || params.teamId || "",
++    },
+     dedupeId: qualify(params.interactionId),
+     conversation: {
+       channel: "slack",
+diff --git a/extensions/slack/src/message-sent-hook.ts b/extensions/slack/src/message-sent-hook.ts
+index 60b0037a0..3622bacb2 100644
+--- a/extensions/slack/src/message-sent-hook.ts
++++ b/extensions/slack/src/message-sent-hook.ts
+@@ -16,6 +16,10 @@ type EmitSlackMessageSentHookParams = Pick<
+   /** Optional canonical session key. When set, the internal `message:sent` hook fires too. */
+   sessionKeyForInternalHooks?: string;
+   accountId?: string | null;
++  sessionId?: string;
++  workspaceId?: string;
++  agentId?: string;
++  threadId?: string;
+ };
+ 
+ export function emitSlackMessageSentHooks(params: EmitSlackMessageSentHookParams): void {
+@@ -33,6 +37,10 @@ export function emitSlackMessageSentHooks(params: EmitSlackMessageSentHookParams
+     accountId: params.accountId ?? undefined,
+     conversationId: params.to,
+     sessionKey: params.sessionKeyForInternalHooks,
++    ...(params.sessionId ? { sessionId: params.sessionId } : {}),
++    ...(params.workspaceId ? { workspaceId: params.workspaceId } : {}),
++    ...(params.agentId ? { agentId: params.agentId } : {}),
++    ...(params.threadId ? { threadId: params.threadId } : {}),
+     messageId: params.messageId,
+     isGroup: params.isGroup,
+     groupId: params.groupId,
+diff --git a/extensions/slack/src/monitor/events/interactions-routing.ts b/extensions/slack/src/monitor/events/interactions-routing.ts
+new file mode 100644
+index 000000000..576678ce1
+--- /dev/null
++++ b/extensions/slack/src/monitor/events/interactions-routing.ts
+@@ -0,0 +1,57 @@
++import type { PluginRuntime } from "openclaw/plugin-sdk/channel-core";
++import type { SlackMonitorContext } from "../context.js";
++
++type RoutingRuntime = Pick<
++  PluginRuntime["channel"]["routing"],
++  "inboundRouteContractVersion" | "resolveInboundRoute"
++>;
++type RouteEvent = Parameters<RoutingRuntime["resolveInboundRoute"]>[0];
++
++export type SlackInteractionRoute = {
++  agentId: string;
++  sessionKey: string;
++  expectedSessionId?: string;
++};
++
++export async function resolveSlackInteractionRoute(params: {
++  ctx: SlackMonitorContext;
++  fallback: SlackInteractionRoute;
++  event: RouteEvent;
++}): Promise<SlackInteractionRoute | null> {
++  const routing = (params.ctx.channelRuntime as PluginRuntime["channel"] | undefined)?.routing as
++    | RoutingRuntime
++    | undefined;
++  if (routing?.inboundRouteContractVersion !== 1) {
++    return params.fallback;
++  }
++  const result = await routing.resolveInboundRoute(params.event);
++  if (!result) {
++    return params.fallback;
++  }
++  if ("drop" in result) {
++    return null;
++  }
++  return {
++    agentId: result.agentId,
++    sessionKey: result.sessionKey,
++    expectedSessionId: result.expectedSessionId,
++  } satisfies SlackInteractionRoute;
++}
++
++export function interactionRouteEvent(params: {
++  accountId: string;
++  workspaceId: string;
++  conversationId: string;
++  senderId: string;
++  messageId: string;
++  content: string;
++  isDirect: boolean;
++  agentId: string;
++  sessionKey: string;
++  threadId?: string;
++  replyToId?: string;
++  interaction?: NonNullable<RouteEvent["interaction"]>;
++  signal?: AbortSignal;
++}): RouteEvent {
++  return { ...params, channel: "slack" };
++}
+diff --git a/extensions/slack/src/monitor/events/interactions.block-actions.ts b/extensions/slack/src/monitor/events/interactions.block-actions.ts
+index 96eaf1bf5..7c8ae60ae 100644
+--- a/extensions/slack/src/monitor/events/interactions.block-actions.ts
++++ b/extensions/slack/src/monitor/events/interactions.block-actions.ts
+@@ -54,6 +54,7 @@ import { resolveSlackDeferredActionTarget } from "../deferred-action-routing.js"
+ import { resolveSlackMonitorEventScope, type SlackEventScope } from "../event-scope.js";
+ import { escapeSlackMrkdwn } from "../mrkdwn.js";
+ import { enqueueSlackInteractionEvent } from "./interaction-event.js";
++import { interactionRouteEvent, resolveSlackInteractionRoute } from "./interactions-routing.js";
+ import { resolveSlackPluginApprovalSender } from "./interactions.approval-sender.js";
+ import { summarizeAction, type SlackActionSummary } from "./modal-input-summary.js";
+ 
+@@ -548,6 +549,7 @@ async function dispatchSlackPluginInteraction(
+     channelType: params.channelType,
+     ctx: {
+       accountId: params.ctx.accountId,
++      workspaceId: params.eventScope?.teamId ?? params.ctx.teamId,
+       interactionId: pluginInteractionId,
+       conversationId: params.parsed.channelId ?? "",
+       parentConversationId: undefined,
+@@ -570,6 +572,17 @@ async function dispatchSlackPluginInteraction(
+     },
+     respond: {
+       acknowledge: async () => {},
++      openModal: async (view) => {
++        const triggerId = normalizeOptionalString(params.parsed.typedBody.trigger_id);
++        if (!triggerId) {
++          throw new Error("Slack modal trigger is unavailable");
++        }
++        return await (params.eventScope?.client ?? params.ctx.app.client).views.open({
++          trigger_id: triggerId,
++          view,
++        });
++      },
++      options: async () => {},
+       reply,
+       followUp: reply,
+       editMessage: async ({ text, blocks }) => {
+@@ -652,12 +665,12 @@ async function resolveSlackBlockActionCommandAuthorized(
+   return commandIngress.commandAccess.authorized;
+ }
+ 
+-function enqueueSlackBlockActionEvent(
++async function enqueueSlackBlockActionEvent(
+   params: SlackBlockActionContext & {
+     teamId?: string;
+     auth: { channelType?: "im" | "mpim" | "channel" | "group" };
+   },
+-): void {
++): Promise<void> {
+   const targetKind = params.auth.channelType === "im" ? "user" : "channel";
+   const targetId = targetKind === "user" ? params.parsed.userId : params.parsed.channelId;
+   const deferredTarget = targetId
+@@ -690,6 +703,35 @@ function enqueueSlackBlockActionEvent(
+     threadTs: params.parsed.threadTs,
+     eventScope: params.eventScope,
+   });
++  const routed = await resolveSlackInteractionRoute({
++    ctx: params.ctx,
++    fallback: route,
++    event: interactionRouteEvent({
++      accountId: params.ctx.accountId,
++      workspaceId: params.teamId ?? params.eventScope?.teamId ?? params.ctx.teamId ?? "",
++      conversationId: params.parsed.channelId ?? `user:${params.parsed.userId}`,
++      senderId: params.parsed.userId,
++      messageId:
++        params.parsed.messageTs ??
++        normalizeOptionalString(params.parsed.typedActionWithText.action_ts) ??
++        params.parsed.typedBody.trigger_id ??
++        params.parsed.actionId,
++      content: resolveSlackActionValue(params.parsed.actionSummary) ?? params.parsed.actionId,
++      isDirect: params.auth.channelType === "im",
++      agentId: route.agentId,
++      sessionKey: route.sessionKey,
++      ...(params.parsed.threadTs ? { threadId: params.parsed.threadTs } : {}),
++      interaction: {
++        kind: params.parsed.actionSummary.actionType === "button" ? "button" : "select",
++        messageTs: params.parsed.messageTs,
++        actionId: params.parsed.actionId,
++        reference: params.parsed.blockId,
++      },
++    }),
++  });
++  if (!routed) {
++    return;
++  }
+   const contextParts = [
+     "slack:interaction",
+     params.teamId,
+@@ -699,7 +741,7 @@ function enqueueSlackBlockActionEvent(
+     normalizeOptionalString(params.parsed.typedActionWithText.action_ts) ??
+       params.parsed.typedBody.trigger_id,
+   ].filter(Boolean);
+-  enqueueSlackInteractionEvent(eventPayload, route, {
++  enqueueSlackInteractionEvent(eventPayload, routed, {
+     contextKey: contextParts.join(":"),
+     deliveryContext: {
+       channel: "slack",
+@@ -880,7 +922,7 @@ export function registerSlackBlockActionHandler(params: {
+         return;
+       }
+     }
+-    enqueueSlackBlockActionEvent({
++    await enqueueSlackBlockActionEvent({
+       ...actionContext,
+       teamId: args.context.teamId,
+       auth,
+diff --git a/extensions/slack/src/monitor/events/interactions.modal.ts b/extensions/slack/src/monitor/events/interactions.modal.ts
+index f16cc1705..7278a2b3b 100644
+--- a/extensions/slack/src/monitor/events/interactions.modal.ts
++++ b/extensions/slack/src/monitor/events/interactions.modal.ts
+@@ -1,6 +1,14 @@
+-import type { AllMiddlewareArgs } from "@slack/bolt";
++import type {
++  AllMiddlewareArgs,
++  ViewResponseAction,
++  ViewSubmitAction,
++  ViewClosedAction,
++} from "@slack/bolt";
+ import { resolveAgentIdFromSessionKey } from "openclaw/plugin-sdk/routing";
+-import { asOptionalObjectRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
++import {
++  asOptionalObjectRecord,
++  normalizeOptionalString,
++} from "openclaw/plugin-sdk/string-coerce-runtime";
+ import { dispatchSlackPluginInteractiveHandler } from "../../interactive-dispatch.js";
+ import { parseSlackModalPrivateMetadata } from "../../modal-metadata.js";
+ import { authorizeSlackSystemEventSender } from "../auth.js";
+@@ -8,6 +16,7 @@ import type { SlackMonitorContext } from "../context.js";
+ import { resolveSlackDeferredActionTarget } from "../deferred-action-routing.js";
+ import { resolveSlackMonitorEventScope, type SlackEventScope } from "../event-scope.js";
+ import { enqueueSlackInteractionEvent } from "./interaction-event.js";
++import { interactionRouteEvent, resolveSlackInteractionRoute } from "./interactions-routing.js";
+ import { summarizeSlackViewState } from "./modal-input-summary.js";
+ 
+ type SlackModalBody = {
+@@ -27,10 +36,10 @@ type SlackModalBody = {
+ };
+ 
+ type SlackModalInteractionKind = "view_submission" | "view_closed";
+-type SlackModalEventHandlerArgs = { ack: () => Promise<void>; body: unknown } & Pick<
+-  AllMiddlewareArgs,
+-  "context" | "client"
+->;
++type SlackModalEventHandlerArgs = {
++  ack: (response?: ViewResponseAction) => Promise<void>;
++  body: unknown;
++} & Pick<AllMiddlewareArgs, "context" | "client">;
+ 
+ const OPENCLAW_MODAL_CALLBACK_PREFIX = "openclaw:";
+ 
+@@ -130,6 +139,7 @@ async function emitSlackModalLifecycleEvent(params: {
+   eventScope?: SlackEventScope;
+   teamId?: string;
+   interactionType: SlackModalInteractionKind;
++  acknowledge: (response?: ViewResponseAction) => Promise<void>;
+ }): Promise<void> {
+   const metadata = parseSlackModalPrivateMetadata(params.body.view?.private_metadata);
+   const callbackId = params.body.view?.callback_id ?? "unknown";
+@@ -205,6 +215,7 @@ async function emitSlackModalLifecycleEvent(params: {
+         channelType,
+         ctx: {
+           accountId: params.ctx.accountId,
++          workspaceId: params.eventScope?.teamId ?? params.ctx.teamId,
+           interactionId,
+           conversationId: sessionRouting.channelId ?? "",
+           parentConversationId: undefined,
+@@ -227,7 +238,18 @@ async function emitSlackModalLifecycleEvent(params: {
+           },
+         },
+         respond: {
+-          acknowledge: async () => {},
++          acknowledge: params.acknowledge,
++          openModal: async (view) => {
++            const triggerId = normalizeOptionalString(params.body.trigger_id);
++            if (!triggerId) {
++              throw new Error("Slack modal trigger is unavailable");
++            }
++            return await (params.eventScope?.client ?? params.ctx.app.client).views.open({
++              trigger_id: triggerId,
++              view,
++            });
++          },
++          options: async () => {},
+           reply: async () => {},
+           followUp: async () => {},
+           editMessage: async () => {},
+@@ -276,6 +298,12 @@ async function emitSlackModalLifecycleEvent(params: {
+ 
+   const pluginDispatch = await dispatchPlugin(auth.allowed, auth.channelType);
+ 
++  // A plugin that consumed the lifecycle owns the response and destination.
++  // Do not wake the native default session for a handled modal.
++  if (pluginDispatch?.matched && pluginDispatch.handled) {
++    return;
++  }
++
+   const pluginEventFields =
+     pluginDispatch?.matched === true
+       ? {
+@@ -296,7 +324,35 @@ async function emitSlackModalLifecycleEvent(params: {
+       })
+     : undefined;
+ 
+-  enqueueSlackInteractionEvent({ ...eventPayload, ...pluginEventFields }, sessionRouting, {
++  const route = await resolveSlackInteractionRoute({
++    ctx: params.ctx,
++    fallback: sessionRouting,
++    event: interactionRouteEvent({
++      accountId: params.ctx.accountId,
++      workspaceId: params.teamId ?? params.eventScope?.teamId ?? params.ctx.teamId ?? "",
++      conversationId: sessionRouting.channelId ?? `user:${userId}`,
++      senderId: userId,
++      messageId: viewId ?? callbackId,
++      content: `${callbackId}:${inputs.map((input) => input.inputValue ?? "").join(",")}`,
++      isDirect: auth.channelType === "im",
++      agentId: sessionRouting.agentId,
++      sessionKey: sessionRouting.sessionKey,
++      interaction: {
++        kind: params.interactionType,
++        messageTs: viewId,
++        actionId: `view:${callbackId}`,
++        reference: callbackId,
++        privateMetadata: payload.privateMetadata,
++        viewId,
++        callbackId,
++      },
++    }),
++  });
++  if (!route) {
++    return;
++  }
++
++  enqueueSlackInteractionEvent({ ...eventPayload, ...pluginEventFields }, route, {
+     contextKey: [
+       isViewClosed ? "slack:interaction:view-closed" : "slack:interaction:view",
+       params.teamId,
+@@ -319,40 +375,56 @@ export function registerModalLifecycleHandler(params: {
+   trackEvent?: () => void;
+   interactionType: SlackModalInteractionKind;
+ }) {
+-  params.ctx.app.view(
+-    { callback_id: /.*/, type: params.interactionType },
+-    async (args: SlackModalEventHandlerArgs) => {
+-      const { ack, body } = args;
+-      if (!shouldHandleSlackModalLifecycleBody(body)) {
+-        return;
+-      }
+-      await ack();
+-      const eventScope = resolveSlackMonitorEventScope({
+-        ctx: params.ctx,
+-        body,
+-        context: args.context,
+-        client: args.client,
+-        onDrop: (reason) =>
+-          params.ctx.runtime.log?.(`slack:interaction drop ${params.interactionType} ${reason}`),
+-      });
+-      if (eventScope === null) {
+-        return;
+-      }
+-      if (params.ctx.shouldDropMismatchedSlackEvent?.(body)) {
+-        params.ctx.runtime.log?.(
+-          `slack:interaction drop ${params.interactionType} payload (mismatched app/team)`,
+-        );
++  const listener = async (args: SlackModalEventHandlerArgs) => {
++    const { ack, body } = args;
++    if (!shouldHandleSlackModalLifecycleBody(body)) {
++      return;
++    }
++    let acknowledged = false;
++    const acknowledge = async (response?: ViewResponseAction) => {
++      if (acknowledged) {
+         return;
+       }
+-      params.trackEvent?.();
+-      const typedBody = body as SlackModalBody;
+-      await emitSlackModalLifecycleEvent({
+-        ctx: await params.ctx.readRuntimeContext(),
+-        body: typedBody,
+-        eventScope,
+-        teamId: args.context.teamId,
+-        interactionType: params.interactionType,
+-      });
+-    },
+-  );
++      acknowledged = true;
++      await ack(response);
++    };
++    const eventScope = resolveSlackMonitorEventScope({
++      ctx: params.ctx,
++      body,
++      context: args.context,
++      client: args.client,
++      onDrop: (reason) =>
++        params.ctx.runtime.log?.(`slack:interaction drop ${params.interactionType} ${reason}`),
++    });
++    if (eventScope === null) {
++      await acknowledge();
++      return;
++    }
++    if (params.ctx.shouldDropMismatchedSlackEvent?.(body)) {
++      params.ctx.runtime.log?.(
++        `slack:interaction drop ${params.interactionType} payload (mismatched app/team)`,
++      );
++      await acknowledge();
++      return;
++    }
++    params.trackEvent?.();
++    const typedBody = body as SlackModalBody;
++    await emitSlackModalLifecycleEvent({
++      ctx: await params.ctx.readRuntimeContext(),
++      body: typedBody,
++      eventScope,
++      teamId: args.context.teamId,
++      interactionType: params.interactionType,
++      acknowledge,
++    });
++    await acknowledge();
++  };
++  if (params.interactionType === "view_submission") {
++    params.ctx.app.view<ViewSubmitAction>({ callback_id: /.*/, type: "view_submission" }, listener);
++  } else {
++    params.ctx.app.view<ViewClosedAction>(
++      { callback_id: /.*/, type: "view_closed" },
++      async (args) => listener({ ...args, ack: async () => args.ack() }),
++    );
++  }
+ }
+diff --git a/extensions/slack/src/monitor/events/interactions.shortcuts.ts b/extensions/slack/src/monitor/events/interactions.shortcuts.ts
+index fd8877572..f124a530e 100644
+--- a/extensions/slack/src/monitor/events/interactions.shortcuts.ts
++++ b/extensions/slack/src/monitor/events/interactions.shortcuts.ts
+@@ -5,6 +5,7 @@ import type { SlackMonitorContext } from "../context.js";
+ import { resolveSlackDeferredActionTarget } from "../deferred-action-routing.js";
+ import { resolveSlackMonitorEventScope } from "../event-scope.js";
+ import { enqueueSlackInteractionEvent } from "./interaction-event.js";
++import { interactionRouteEvent, resolveSlackInteractionRoute } from "./interactions-routing.js";
+ 
+ type SlackShortcutHandlerArgs = SlackShortcutMiddlewareArgs &
+   Pick<AllMiddlewareArgs, "context" | "client">;
+@@ -115,7 +116,32 @@ export function registerSlackShortcutHandler(params: {
+     runtimeContext.runtime.log?.(
+       `slack:interaction ${interactionType} callback=${callbackId} user=${userId} channel=${channelId ?? "direct"}`,
+     );
+-    enqueueSlackInteractionEvent(eventPayload, route, {
++    const routed = await resolveSlackInteractionRoute({
++      ctx: runtimeContext,
++      fallback: route,
++      event: interactionRouteEvent({
++        accountId: runtimeContext.accountId,
++        workspaceId: teamId ?? eventScope?.teamId ?? runtimeContext.teamId ?? "",
++        conversationId: channelId ?? `user:${userId}`,
++        senderId: userId,
++        messageId: messageTs ?? body.action_ts ?? body.trigger_id ?? callbackId,
++        content: callbackId,
++        isDirect: auth.channelType === "im",
++        agentId: route.agentId,
++        sessionKey: route.sessionKey,
++        ...(threadTs ? { threadId: threadTs } : {}),
++        interaction: {
++          kind: "shortcut",
++          messageTs,
++          actionId: `shortcut:${callbackId}`,
++          reference: callbackId,
++        },
++      }),
++    });
++    if (!routed) {
++      return;
++    }
++    enqueueSlackInteractionEvent(eventPayload, routed, {
+       contextKey,
+       deliveryContext: {
+         channel: "slack",
+diff --git a/extensions/slack/src/monitor/events/interactions.test-support.ts b/extensions/slack/src/monitor/events/interactions.test-support.ts
+index 7b5df7066..ec2685536 100644
+--- a/extensions/slack/src/monitor/events/interactions.test-support.ts
++++ b/extensions/slack/src/monitor/events/interactions.test-support.ts
+@@ -105,6 +105,12 @@ type RegisteredShortcutHandler = (
+     context?: TestBoltContext;
+   },
+ ) => Promise<void>;
++type RegisteredOptionsHandler = (args: {
++  ack: (response?: unknown) => Promise<void>;
++  client?: TestSlackClient;
++  context?: TestBoltContext;
++  body: Record<string, unknown>;
++}) => Promise<void>;
+ 
+ type TestBoltContext = {
+   teamId?: string;
+@@ -144,6 +150,7 @@ export function createContext(overrides?: {
+   let viewHandler: RegisteredViewHandler | null = null;
+   let viewClosedHandler: RegisteredViewHandler | null = null;
+   let shortcutHandler: RegisteredShortcutHandler | null = null;
++  let optionsHandler: RegisteredOptionsHandler | null = null;
+   const installationIdentity = overrides?.installationIdentity ?? {
+     kind: "workspace" as const,
+     teamId: "T_TEST",
+@@ -198,6 +205,9 @@ export function createContext(overrides?: {
+     shortcut: vi.fn((_matcher: RegExp, next: RegisteredShortcutHandler) => {
+       shortcutHandler = async (args) => await next(withBoltScope(args));
+     }),
++    options: vi.fn((_matcher: RegExp, next: RegisteredOptionsHandler) => {
++      optionsHandler = async (args) => await next(withBoltScope(args));
++    }),
+     client: listenerClient,
+   };
+   const runtimeLog = vi.fn();
+@@ -291,5 +301,11 @@ export function createContext(overrides?: {
+       }
+       return shortcutHandler;
+     },
++    getOptionsHandler: () => {
++      if (!optionsHandler) {
++        throw new Error("Expected Slack options handler to be registered");
++      }
++      return optionsHandler;
++    },
+   };
+ }
+diff --git a/extensions/slack/src/monitor/events/interactions.test.ts b/extensions/slack/src/monitor/events/interactions.test.ts
+index 26b0f248a..116c1c7e1 100644
+--- a/extensions/slack/src/monitor/events/interactions.test.ts
++++ b/extensions/slack/src/monitor/events/interactions.test.ts
+@@ -65,9 +65,14 @@ vi.mock("openclaw/plugin-sdk/system-event-runtime", async (importOriginal) => {
+     ...actual,
+     enqueueRoutedSystemEvent: (
+       text: unknown,
+-      route: { sessionKey: unknown },
++      route: { sessionKey: unknown; expectedSessionId?: string },
+       options: Record<string, unknown>,
+-    ) => enqueueSystemEventMock(text, { ...options, sessionKey: route.sessionKey }),
++    ) =>
++      enqueueSystemEventMock(text, {
++        ...options,
++        sessionKey: route.sessionKey,
++        ...(route.expectedSessionId ? { expectedSessionId: route.expectedSessionId } : {}),
++      }),
+   };
+ });
+ 
+@@ -324,6 +329,97 @@ describe("registerSlackInteractionEvents", () => {
+     expect(requestHeartbeatMock).toHaveBeenCalledOnce();
+   });
+ 
++  it("routes a prepared modal submission using its opaque callback reference", async () => {
++    const { ctx, getViewHandler } = createContext();
++    const callbackId = "openclaw:slack-workspace:modal:reference";
++    const resolveInboundRoute = vi.fn().mockResolvedValue({
++      agentId: "main",
++      sessionKey: "agent:main:modal-origin",
++      expectedSessionId: "modal-generation",
++    });
++    Object.assign(ctx, {
++      teamId: "T_TEST",
++      channelRuntime: { routing: { inboundRouteContractVersion: 1, resolveInboundRoute } },
++    });
++    registerSlackInteractionEvents({ ctx: ctx as never });
++    await getViewHandler()({
++      ack: vi.fn().mockResolvedValue(undefined),
++      body: {
++        team: { id: "T_TEST" },
++        user: { id: "U123" },
++        view: {
++          id: "V1",
++          callback_id: callbackId,
++          private_metadata: JSON.stringify({
++            channelId: "D1",
++            channelType: "im",
++            userId: "U123",
++            pluginInteractiveData: "slack-workspace:modal:reference",
++          }),
++          state: {
++            values: { note: { value: { type: "plain_text_input", value: "modal verification" } } },
++          },
++        },
++      },
++    });
++    expect(resolveInboundRoute).toHaveBeenCalledWith(
++      expect.objectContaining({
++        channel: "slack",
++        conversationId: "D1",
++        interaction: expect.objectContaining({ reference: callbackId, callbackId }),
++      }),
++    );
++    expect(enqueueSystemEventMock).toHaveBeenCalledWith(
++      expect.any(String),
++      expect.objectContaining({
++        sessionKey: "agent:main:modal-origin",
++        expectedSessionId: "modal-generation",
++      }),
++    );
++  });
++
++  it("registers external-select options with the authenticated Slack address", async () => {
++    const { ctx, getOptionsHandler } = createContext();
++    dispatchPluginInteractiveHandlerMock.mockImplementation(async (params) => {
++      await params.respond.options([
++        { text: { type: "plain_text", text: "Alpha" }, value: "alpha" },
++      ]);
++      return { matched: true, handled: true, duplicate: false };
++    });
++    registerSlackInteractionEvents({ ctx: ctx as never });
++
++    const firstAck = vi.fn().mockResolvedValue(undefined);
++    const secondAck = vi.fn().mockResolvedValue(undefined);
++    const request = {
++      type: "block_suggestion",
++      action_id: "lookup",
++      value: "alp",
++      user: { id: "U123" },
++      team: { id: "T_TEST" },
++      container: { channel_id: "C1" },
++    };
++    await getOptionsHandler()({ ack: firstAck, body: request });
++    await getOptionsHandler()({ ack: secondAck, body: request });
++
++    expect(firstAck).toHaveBeenCalledOnce();
++    expect(secondAck).toHaveBeenCalledOnce();
++    expect(firstAck).toHaveBeenCalledWith({
++      options: [{ text: { type: "plain_text", text: "Alpha" }, value: "alpha" }],
++    });
++    expect(dispatchPluginInteractiveHandlerMock).toHaveBeenCalledTimes(2);
++    expect(pluginDispatchCall(0).ctx).toMatchObject({
++      accountId: "default",
++      workspaceId: "T_TEST",
++      conversationId: "C1",
++      senderId: "U123",
++    });
++    expect(pluginDispatchCall(0).ctx.interaction).toMatchObject({
++      kind: "options",
++      actionId: "lookup",
++      query: "alp",
++    });
++  });
++
+   it("routes message shortcuts with selected-message context", async () => {
+     const { getShortcutHandler, resolveSessionKey } = setupInteractions({
+       installationIdentity: { kind: "enterprise", enterpriseId: "E1" },
+@@ -2250,7 +2346,7 @@ describe("registerSlackInteractionEvents", () => {
+   it("dispatches plugin-owned modal submissions with full view state before compacting events", async () => {
+     dispatchPluginInteractiveHandlerMock.mockResolvedValueOnce({
+       matched: true,
+-      handled: true,
++      handled: false,
+       duplicate: false,
+       result: {
+         systemEvent: {
+@@ -2334,7 +2430,7 @@ describe("registerSlackInteractionEvents", () => {
+     expect(eventText.length).toBeLessThanOrEqual(2400);
+     const payload = slackInteractionPayload();
+     expectRecordFields(payload, {
+-      pluginHandled: true,
++      pluginHandled: false,
+       pluginNamespace: "dean.contract",
+     });
+     expect(payload.pluginSystemEvent).toEqual({
+diff --git a/extensions/slack/src/monitor/events/interactions.ts b/extensions/slack/src/monitor/events/interactions.ts
+index 535bc96c9..624b7a798 100644
+--- a/extensions/slack/src/monitor/events/interactions.ts
++++ b/extensions/slack/src/monitor/events/interactions.ts
+@@ -1,4 +1,11 @@
++import { randomUUID } from "node:crypto";
++import type { AllMiddlewareArgs, SlackOptionsMiddlewareArgs } from "@slack/bolt";
++import { dispatchSlackPluginInteractiveHandler } from "../../interactive-dispatch.js";
++import { parseSlackModalPrivateMetadata } from "../../modal-metadata.js";
++import { authorizeSlackSystemEventSender } from "../auth.js";
+ import type { SlackMonitorContext } from "../context.js";
++import { resolveSlackMonitorEventScope } from "../event-scope.js";
++import { interactionRouteEvent, resolveSlackInteractionRoute } from "./interactions-routing.js";
+ import { registerSlackBlockActionHandler } from "./interactions.block-actions.js";
+ import { registerModalLifecycleHandler } from "./interactions.modal.js";
+ import { registerSlackShortcutHandler } from "./interactions.shortcuts.js";
+@@ -10,6 +17,7 @@ export function registerSlackInteractionEvents(params: {
+   const { ctx, trackEvent } = params;
+   registerSlackBlockActionHandler(params);
+   registerSlackShortcutHandler(params);
++  registerSlackOptionsHandler(params);
+ 
+   if (typeof ctx.app.view !== "function") {
+     return;
+@@ -24,3 +32,136 @@ export function registerSlackInteractionEvents(params: {
+     });
+   }
+ }
++
++type SlackOptionsBody = {
++  type?: string;
++  action_id?: string;
++  value?: string;
++  user?: { id?: string };
++  team?: { id?: string };
++  container?: { channel_id?: string; message_ts?: string };
++  view?: { id?: string; private_metadata?: string };
++};
++type SlackOptionsHandlerArgs = SlackOptionsMiddlewareArgs<"block_suggestion"> &
++  Pick<AllMiddlewareArgs, "context" | "client">;
++
++function registerSlackOptionsHandler(params: {
++  ctx: SlackMonitorContext;
++  trackEvent?: () => void;
++}): void {
++  if (typeof params.ctx.app.options !== "function") {
++    return;
++  }
++  params.ctx.app.options({ type: "block_suggestion" }, async (args: SlackOptionsHandlerArgs) => {
++    const body = args.body as SlackOptionsBody;
++    const userId = body.user?.id?.trim();
++    const actionId = body.action_id?.trim();
++    if (!userId || !actionId) {
++      await args.ack({ options: [] });
++      return;
++    }
++    const metadata = parseSlackModalPrivateMetadata(body.view?.private_metadata);
++    const channelId = body.container?.channel_id ?? metadata.channelId;
++    const runtimeContext = await params.ctx.readRuntimeContext();
++    const eventScope = resolveSlackMonitorEventScope({
++      ctx: runtimeContext,
++      body: channelId ? { ...body, channel: { id: channelId } } : body,
++      context: args.context,
++      client: args.client,
++      onDrop: () => undefined,
++    });
++    if (eventScope === null) {
++      await args.ack({ options: [] });
++      return;
++    }
++    const auth = await authorizeSlackSystemEventSender({
++      ctx: runtimeContext,
++      eventScope,
++      senderId: userId,
++      channelId,
++      channelType: metadata.channelType === "im" ? "im" : undefined,
++      expectedSenderId: metadata.userId ?? userId,
++      interactiveEvent: true,
++    });
++    if (!auth.allowed) {
++      await args.ack({ options: [] });
++      return;
++    }
++    const fallback = runtimeContext.resolveSlackSystemEventRoute({
++      channelId,
++      channelType: auth.channelType,
++      senderId: userId,
++      eventScope,
++    });
++    const routed = await resolveSlackInteractionRoute({
++      ctx: runtimeContext,
++      fallback,
++      event: interactionRouteEvent({
++        accountId: runtimeContext.accountId,
++        workspaceId: args.context.teamId ?? eventScope?.teamId ?? runtimeContext.teamId ?? "",
++        conversationId: channelId ?? `user:${userId}`,
++        senderId: userId,
++        messageId: body.view?.id ?? body.container?.message_ts ?? actionId,
++        content: body.value ?? "",
++        isDirect: auth.channelType === "im",
++        agentId: fallback.agentId,
++        sessionKey: fallback.sessionKey,
++        interaction: {
++          kind: "options",
++          messageTs: body.container?.message_ts,
++          actionId,
++          reference: body.view?.id,
++          viewId: body.view?.id,
++        },
++      }),
++    });
++    if (!routed) {
++      await args.ack({ options: [] });
++      return;
++    }
++    let acknowledged = false;
++    const acknowledge = async () => {
++      if (!acknowledged) {
++        acknowledged = true;
++        await args.ack({ options: [] });
++      }
++    };
++    const result = await dispatchSlackPluginInteractiveHandler({
++      data: actionId,
++      interactionId: `options:${randomUUID()}`,
++      teamId: eventScope?.teamId ?? args.context.teamId,
++      channelType: auth.channelType,
++      ctx: {
++        accountId: runtimeContext.accountId,
++        workspaceId: eventScope?.teamId ?? args.context.teamId ?? runtimeContext.teamId ?? "",
++        interactionId: `options:${actionId}`,
++        conversationId: channelId ?? `user:${userId}`,
++        senderId: userId,
++        auth: { isAuthorizedSender: true },
++        interaction: {
++          kind: "options",
++          actionId,
++          query: body.value ?? "",
++          viewId: body.view?.id,
++        },
++      },
++      respond: {
++        acknowledge,
++        openModal: async () => undefined,
++        options: async (options) => {
++          if (!acknowledged) {
++            acknowledged = true;
++            await args.ack({ options });
++          }
++        },
++        reply: async () => undefined,
++        followUp: async () => undefined,
++        editMessage: async () => undefined,
++      },
++    });
++    params.trackEvent?.();
++    if (!acknowledged || !result.matched) {
++      await acknowledge();
++    }
++  });
++}
+diff --git a/extensions/slack/src/monitor/message-handler/dispatch-setup.ts b/extensions/slack/src/monitor/message-handler/dispatch-setup.ts
+index b43ecc660..4f8c8afec 100644
+--- a/extensions/slack/src/monitor/message-handler/dispatch-setup.ts
++++ b/extensions/slack/src/monitor/message-handler/dispatch-setup.ts
+@@ -111,6 +111,10 @@ export async function createSlackDispatchSetup(prepared: PreparedSlackMessage) {
+     prepared.ctxPayload.OriginatingTo ?? prepared.ctxPayload.To ?? prepared.replyTarget;
+   const messageSentHookContext = {
+     sessionKeyForInternalHooks: prepared.ctxPayload.SessionKey ?? route.sessionKey,
++    sessionId: prepared.expectedSessionId,
++    workspaceId: prepared.eventScope?.teamId ?? ctx.teamId,
++    agentId: route.agentId,
++    threadId: statusThreadTs,
+     isGroup: prepared.isRoomish,
+     groupId: prepared.isRoomish ? message.channel : undefined,
+   };
+diff --git a/extensions/slack/src/monitor/message-handler/dispatch.ts b/extensions/slack/src/monitor/message-handler/dispatch.ts
+index ebc75d64d..2a2e028d4 100644
+--- a/extensions/slack/src/monitor/message-handler/dispatch.ts
++++ b/extensions/slack/src/monitor/message-handler/dispatch.ts
+@@ -453,6 +453,18 @@ async function dispatchSlackMessageWithSetup(
+         ...(turnAdoptionLifecycle ? { turnAdoptionLifecycle } : {}),
+         skillFilter: prepared.channelConfig?.skills,
+         sourceReplyDeliveryMode,
++        ...(prepared.routeExpectedSessionId
++          ? {
++              expectedExistingSessionId: prepared.routeExpectedSessionId,
++              pinExpectedExistingSession: true,
++            }
++          : {}),
++        onSessionPrepared: (binding) => {
++          const sessionId = binding.sessionId;
++          if (sessionId) {
++            messageSentHookContext.sessionId = sessionId;
++          }
++        },
+         // Room events are observe-style turns; Slack status indicators imply an
+         // automatic visible reply and can auto-open assistant threads.
+         suppressTyping: suppressRoomEventTyping ? true : undefined,
+diff --git a/extensions/slack/src/monitor/message-handler/prepare.test.ts b/extensions/slack/src/monitor/message-handler/prepare.test.ts
+index 2550adaf6..09702493e 100644
+--- a/extensions/slack/src/monitor/message-handler/prepare.test.ts
++++ b/extensions/slack/src/monitor/message-handler/prepare.test.ts
+@@ -128,6 +128,40 @@ function createSlackMessage(overrides: Partial<SlackMessageEvent>): SlackMessage
+ describe("slack prepareSlackMessage inbound contract", () => {
+   const storeFixture = createSlackSessionStoreFixture("openclaw-slack-thread-");
+ 
++  it("carries a cross-agent inbound route through last-route admission", async () => {
++    const storePath = storeFixture.makeTmpStorePath().storePath;
++    const ctx = createInboundSlackTestContext({
++      cfg: { session: { store: storePath } },
++    });
++    const resolveInboundRoute = vi.fn(async () => ({
++      agentId: "reviewer",
++      sessionKey: "agent:reviewer:slack:direct:U1",
++      expectedSessionId: "session-reviewer-1",
++    }));
++    Object.assign(ctx.channelRuntime, {
++      routing: { inboundRouteContractVersion: 1, resolveInboundRoute },
++    });
++
++    const prepared = await prepareMessageWith(
++      ctx,
++      createSlackAccount(),
++      createSlackMessage({ channel: "D123", channel_type: "im" }),
++    );
++
++    expect(prepared?.route).toMatchObject({
++      agentId: "reviewer",
++      sessionKey: "agent:reviewer:slack:direct:U1",
++      mainSessionKey: "agent:reviewer:main",
++      lastRoutePolicy: "session",
++    });
++    expect(prepared?.turn.record.updateLastRoute).toMatchObject({
++      sessionKey: "agent:reviewer:slack:direct:U1",
++    });
++    expect(prepared?.routeExpectedSessionId).toBe("session-reviewer-1");
++    expect(resolveInboundRoute).toHaveBeenCalledWith(expect.objectContaining({ channel: "slack" }));
++    expect(resolveInboundRoute).toHaveBeenCalledOnce();
++  });
++
+   beforeEach(() => {
+     clearSlackThreadParticipationCache();
+     enqueueSystemEventMock.mockClear();
+diff --git a/extensions/slack/src/monitor/message-handler/prepare.ts b/extensions/slack/src/monitor/message-handler/prepare.ts
+index 49a06556b..849f3bc05 100644
+--- a/extensions/slack/src/monitor/message-handler/prepare.ts
++++ b/extensions/slack/src/monitor/message-handler/prepare.ts
+@@ -33,7 +33,10 @@ import {
+   type HistoryEntry,
+ } from "openclaw/plugin-sdk/reply-history";
+ import type { FinalizedMsgContext } from "openclaw/plugin-sdk/reply-runtime";
+-import { resolveInboundLastRouteSessionKey } from "openclaw/plugin-sdk/routing";
++import {
++  buildAgentMainSessionKey,
++  resolveInboundLastRouteSessionKey,
++} from "openclaw/plugin-sdk/routing";
+ import { logVerbose, shouldLogVerbose } from "openclaw/plugin-sdk/runtime-env";
+ import { resolvePinnedMainDmOwnerFromAllowlist } from "openclaw/plugin-sdk/security-runtime";
+ import { getSessionEntry, resolveStorePath } from "openclaw/plugin-sdk/session-store-runtime";
+@@ -70,6 +73,10 @@ import {
+ } from "../context.js";
+ import { authorizeSlackDirectMessage } from "../dm-auth.js";
+ import type { SlackEventScope } from "../event-scope.js";
++import {
++  interactionRouteEvent,
++  resolveSlackInteractionRoute,
++} from "../events/interactions-routing.js";
+ import type { SlackMediaResult } from "../media-types.js";
+ import { escapeSlackMrkdwn } from "../mrkdwn.js";
+ import { resolveSlackRoomContextHints } from "../room-context.js";
+@@ -227,6 +234,7 @@ type SlackInboundDropReason =
+   | "other-mention"
+   | "missing-mention"
+   | "empty-content"
++  | "inbound-route-dropped"
+   | "final-route-denied";
+ 
+ type SlackMentionMetadata = {
+@@ -988,15 +996,16 @@ export async function prepareSlackMessage(params: {
+     preflightAudioMedia = undefined;
+   }
+   const {
+-    route,
+     runtimeBinding,
+     replyToMode,
+     threadContext,
+     threadTs,
+     isThreadReply,
+-    threadKeys,
+-    sessionKey,
++    threadKeys: initialThreadKeys,
+   } = routing;
++  let route = routing.route;
++  let sessionKey = routing.sessionKey;
++  let threadKeys = initialThreadKeys;
+   const directThreadRoutedToDmSession =
+     !assistantThreadContext &&
+     !agentViewThreadTs &&
+@@ -1081,6 +1090,43 @@ export async function prepareSlackMessage(params: {
+         rawBody,
+       })
+     : rawBody;
++  const routedMessage = await resolveSlackInteractionRoute({
++    ctx,
++    fallback: { agentId: route.agentId, sessionKey },
++    event: interactionRouteEvent({
++      accountId: account.accountId,
++      workspaceId: opts.eventScope?.teamId ?? ctx.teamId,
++      conversationId: message.channel,
++      senderId: message.user ?? "unknown",
++      messageId: message.ts ?? message.event_ts ?? "unknown",
++      content: bodyForAgent,
++      isDirect: isDirectMessage,
++      agentId: route.agentId,
++      sessionKey,
++      ...(threadContext.messageThreadId ? { threadId: threadContext.messageThreadId } : {}),
++    }),
++  });
++  if (!routedMessage) {
++    return drop("inbound-route-dropped");
++  }
++  const routeExpectedSessionId = routedMessage.expectedSessionId;
++  if (routedMessage.agentId !== route.agentId || routedMessage.sessionKey !== sessionKey) {
++    const previousAgentId = route.agentId;
++    route = {
++      ...route,
++      agentId: routedMessage.agentId,
++      sessionKey: routedMessage.sessionKey,
++      mainSessionKey: buildAgentMainSessionKey({
++        agentId: routedMessage.agentId,
++        mainKey: cfg.session?.mainKey,
++      }),
++      lastRoutePolicy: "session",
++    };
++    sessionKey = routedMessage.sessionKey;
++    if (previousAgentId !== routedMessage.agentId) {
++      threadKeys = { sessionKey, parentSessionKey: undefined };
++    }
++  }
+   const ackReaction = resolveAckReaction(cfg, route.agentId, {
+     channel: "slack",
+     accountId: account.accountId,
+@@ -1547,9 +1593,12 @@ export async function prepareSlackMessage(params: {
+     channelConfig,
+     replyTarget,
+     ctxPayload,
++    expectedSessionId: sessionEntry?.sessionId,
+     sessionDisplayName: sessionEntry?.displayName,
++    ...(routeExpectedSessionId ? { routeExpectedSessionId } : {}),
+     turn: {
+       record: {
++        ...(routeExpectedSessionId ? { expectedSessionId: routeExpectedSessionId } : {}),
+         updateLastRoute:
+           isDirectMessage || opts.eventScope
+             ? {
+diff --git a/extensions/slack/src/monitor/message-handler/types.ts b/extensions/slack/src/monitor/message-handler/types.ts
+index d7dd6d1e3..54d7c13a3 100644
+--- a/extensions/slack/src/monitor/message-handler/types.ts
++++ b/extensions/slack/src/monitor/message-handler/types.ts
+@@ -26,6 +26,8 @@ export type PreparedSlackMessage = {
+   eventScope?: SlackEventScope;
+   turnAdoptionLifecycle?: GetReplyOptions["turnAdoptionLifecycle"];
+   route: ResolvedAgentRoute;
++  expectedSessionId?: string;
++  routeExpectedSessionId?: string;
+   channelConfig: SlackChannelConfigResolved | null;
+   replyTarget: string;
+   ctxPayload: FinalizedMsgContext;
+diff --git a/extensions/slack/src/send-results.ts b/extensions/slack/src/send-results.ts
+index 1e43f013d..debc7c183 100644
+--- a/extensions/slack/src/send-results.ts
++++ b/extensions/slack/src/send-results.ts
+@@ -13,7 +13,7 @@ export function mergeSlackSendResults(results: readonly SlackSendResult[]): Slac
+   // Keep every accepted ID while retaining the legacy final-message scalar fields.
+   const receipt = createMessageReceiptFromOutboundResults({ results });
+   receipt.parts = receipt.parts.map((part, index) => ({ ...part, index }));
+-  const questionResult = results.find((result) => result.meta?.slackQuestionActionIds.length);
++  const questionResult = results.find((result) => result.meta?.slackQuestionActionIds?.length);
+   return {
+     ...lastResult,
+     receipt,
+diff --git a/extensions/slack/src/send.blocks.test.ts b/extensions/slack/src/send.blocks.test.ts
+index 24e5eb6e6..bd9f190e9 100644
+--- a/extensions/slack/src/send.blocks.test.ts
++++ b/extensions/slack/src/send.blocks.test.ts
+@@ -1,6 +1,7 @@
+ import { PlatformMessageNotDispatchedError } from "openclaw/plugin-sdk/error-runtime";
+ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+ import { createSlackSendTestClient } from "./blocks.test-helpers.js";
++import { registerSlackInstallationState } from "./installation-identity-state.js";
+ import { SLACK_MESSAGE_TEXT_RECOMMENDED_LIMIT } from "./limits.js";
+ import { SLACK_QUESTION_FINALIZATION_BLOCKS } from "./reply-action-ids.js";
+ import {
+@@ -191,6 +192,17 @@ describe("sendMessageSlack chunking", () => {
+ });
+ 
+ describe("sendMessageSlack blocks", () => {
++  it("keeps workspace provenance separate from question-control provenance", async () => {
++    const installation = registerSlackInstallationState("default", "workspace", "T123");
++    try {
++      const result = await send("Progress update");
++      expect(result.meta?.workspaceId).toBe("T123");
++      expect(result.meta?.slackQuestionActionIds).toBeUndefined();
++    } finally {
++      installation.release();
++    }
++  });
++
+   it("marks only the fallback card that actually contains the question controls", async () => {
+     let messageCount = 0;
+     client.chat.postMessage = vi.fn(async () => ({
+diff --git a/extensions/slack/src/send.ts b/extensions/slack/src/send.ts
+index e7171c9ee..9193036c8 100644
+--- a/extensions/slack/src/send.ts
++++ b/extensions/slack/src/send.ts
+@@ -46,6 +46,7 @@ import {
+ import { assertSlackDetachedTargetAllowed } from "./detached-target-admission.js";
+ import { getSlackWebApiErrorData } from "./errors.js";
+ import { chunkSlackMrkdwnText, markdownToSlackMrkdwnChunks } from "./format.js";
++import { getSlackInstallationTeamId } from "./installation-identity-state.js";
+ import { SLACK_EDIT_TEXT_MAX_BYTES, SLACK_TEXT_LIMIT } from "./limits.js";
+ import type { SlackEventScope } from "./monitor/event-scope.js";
+ import { hasSlackNativeDataBlock, isSlackInvalidBlocksError } from "./native-data-blocks.js";
+@@ -214,7 +215,8 @@ export type SlackSendResult = {
+   receipt: MessageReceipt;
+   threadTs?: string;
+   meta?: {
+-    slackQuestionActionIds: string[];
++    slackQuestionActionIds?: string[];
++    workspaceId?: string;
+     slackQuestionMessageId?: string;
+     [SLACK_QUESTION_FINALIZATION_BLOCKS]?: (Block | KnownBlock)[];
+   };
+@@ -949,6 +951,7 @@ async function sendMessageSlackQueued(params: {
+         ...(delivery.dmCacheOwner ? { dmCacheOwner: delivery.dmCacheOwner } : {}),
+       });
+   const deliveredResults: SlackSendResult[] = [];
++  const workspaceId = delivery.teamId ?? getSlackInstallationTeamId(account.accountId);
+   const reportDelivery = async (
+     result: SlackSendResult,
+     deliveredBlocks?: (Block | KnownBlock)[],
+@@ -957,17 +960,20 @@ async function sendMessageSlackQueued(params: {
+     // actual posted card so uploads and text chunks cannot steal finalization.
+     // Preserve only accepted display blocks; actions contain private callback data.
+     const slackQuestionActionIds = resolveSlackQuestionActionIds(deliveredBlocks);
+-    const deliveryResult = slackQuestionActionIds.length
+-      ? {
+-          ...result,
+-          meta: {
+-            ...result.meta,
++    const deliveryMeta = {
++      ...result.meta,
++      ...(workspaceId ? { workspaceId } : {}),
++      ...(slackQuestionActionIds.length
++        ? {
+             slackQuestionActionIds,
+             [SLACK_QUESTION_FINALIZATION_BLOCKS]: deliveredBlocks!.filter(
+               (block) => block.type !== "actions",
+             ),
+-          },
+-        }
++          }
++        : {}),
++    };
++    const deliveryResult = Object.keys(deliveryMeta).length
++      ? { ...result, meta: deliveryMeta }
+       : result;
+     deliveredResults.push(deliveryResult);
+     await opts.onDeliveryResult?.(deliveryResult);
+@@ -1173,21 +1179,26 @@ async function sendMessageSlackQueued(params: {
+       replyBroadcast: carriesPrimaryMessageOptions ? opts.replyBroadcast : undefined,
+       metadata,
+     });
+-    if (pendingBlockFallback && partDelivery.meta?.slackQuestionActionIds.length) {
++    if (pendingBlockFallback && partDelivery.meta?.slackQuestionActionIds?.length) {
+       questionDelivery = partDelivery;
+     }
+   }
+ 
+   const deliveredThreadTs =
+     canonicalDeliveredThreadTs ?? normalizeSlackThreadTsCandidate(opts.threadTs);
++  const aggregateMeta =
++    questionDelivery?.meta ?? deliveredResults.find((result) => result.meta?.workspaceId)?.meta;
+   return {
+     messageId: lastMessageId,
+     channelId: deliveredChannelId,
+     threadTs: deliveredThreadTs,
+     // Finalization follows the actual question card even when a later part wins.
+-    ...(questionDelivery?.meta
++    ...(aggregateMeta
+       ? {
+-          meta: { ...questionDelivery.meta, slackQuestionMessageId: questionDelivery.messageId },
++          meta: {
++            ...aggregateMeta,
++            ...(questionDelivery ? { slackQuestionMessageId: questionDelivery.messageId } : {}),
++          },
+         }
+       : {}),
+     receipt: createSlackSendReceiptFromResults(deliveredResults, deliveredThreadTs),
+diff --git a/src/agents/command/prepare.ts b/src/agents/command/prepare.ts
+index 5128b2a58..26ee4e0b6 100644
+--- a/src/agents/command/prepare.ts
++++ b/src/agents/command/prepare.ts
+@@ -255,6 +255,7 @@ export async function prepareAgentCommandExecution(
+     cfg,
+     agentId: sessionAgentId,
+     sessionKey,
++    sessionId,
+   });
+   const agentWorkspaceDir = resolveAgentWorkspaceDir(cfg, sessionAgentId);
+   const workspaceDirRaw = normalizedSpawned.workspaceDir ?? agentWorkspaceDir;
+diff --git a/src/channels/session.test.ts b/src/channels/session.test.ts
+index bb615ed50..04c80baa6 100644
+--- a/src/channels/session.test.ts
++++ b/src/channels/session.test.ts
+@@ -252,6 +252,23 @@ describe("recordInboundSession", () => {
+     expect(route?.createIfMissing).toBe(false);
+   });
+ 
++  it("waits for guarded metadata admission and propagates stale-session rejection", async () => {
++    const recordError = new Error("stale session");
++    recordSessionMetaFromInboundMock.mockRejectedValueOnce(recordError);
++    const onRecordError = vi.fn();
++
++    await expect(
++      recordInboundSession({
++        storePath: "/tmp/openclaw-session-store.json",
++        sessionKey: "agent:main:demo-channel:1234:thread:42",
++        expectedSessionId: "session-current",
++        ctx,
++        onRecordError,
++      }),
++    ).rejects.toBe(recordError);
++    expect(onRecordError).not.toHaveBeenCalled();
++  });
++
+   it.each([
+     {
+       name: "throws synchronously",
+diff --git a/src/channels/session.ts b/src/channels/session.ts
+index 178a3e209..fbc819d6a 100644
+--- a/src/channels/session.ts
++++ b/src/channels/session.ts
+@@ -28,7 +28,8 @@ export async function recordInboundSession(
+   params: Parameters<RecordInboundSession>[0],
+ ): Promise<void> {
+   // Session keys may contain opaque peer ids; preserve case-sensitive payloads while normalizing shape.
+-  const { storePath, sessionKey, ctx, groupResolution, createIfMissing } = params;
++  const { storePath, sessionKey, ctx, groupResolution, createIfMissing, expectedSessionId } =
++    params;
+   const canonicalSessionKey = normalizeSessionKeyPreservingOpaquePeerIds(sessionKey);
+   const runtime = await loadInboundSessionRuntime();
+   const write = runtime.recordInboundSessionMeta({
+@@ -37,8 +38,12 @@ export async function recordInboundSession(
+     ctx,
+     groupResolution,
+     createIfMissing,
++    expectedSessionId,
+   });
+   const metaTask = write.catch(async (err: unknown) => {
++    if (expectedSessionId !== undefined) {
++      throw err;
++    }
+     try {
+       await Promise.resolve(params.onRecordError(err));
+     } catch {
+@@ -46,8 +51,14 @@ export async function recordInboundSession(
+     }
+   });
+   params.trackSessionMetaTask?.(metaTask);
++  // Keep the caller-visible rejection while marking the detached tracker as
++  // handled when no consumer was supplied.
++  void metaTask.catch(() => undefined);
+   // Dispatch needs the writer settled, but best-effort reporting stays with its tracker.
+   await write.catch(async (err: unknown) => {
++    if (expectedSessionId !== undefined) {
++      throw err;
++    }
+     const { AgentDatabaseAdmissionError } = await import("../state/agent-database-admission.js");
+     if (
+       err instanceof AgentDatabaseAdmissionError &&
+diff --git a/src/channels/session.types.ts b/src/channels/session.types.ts
+index cefd5ed62..2522175d0 100644
+--- a/src/channels/session.types.ts
++++ b/src/channels/session.types.ts
+@@ -17,6 +17,7 @@ export type InboundLastRouteUpdate = {
+ };
+ 
+ export type RecordInboundSession = (params: {
++  expectedSessionId?: string;
+   storePath: string;
+   sessionKey: string;
+   ctx: MsgContext;
+diff --git a/src/channels/turn/durable-delivery.ts b/src/channels/turn/durable-delivery.ts
+index ac9865266..8d2b5f921 100644
+--- a/src/channels/turn/durable-delivery.ts
++++ b/src/channels/turn/durable-delivery.ts
+@@ -46,6 +46,8 @@ export type DurableInboundReplyDeliveryParams = DurableInboundReplyDeliveryOptio
+   payload: ReplyPayload;
+   info: ChannelDeliveryInfo;
+   runId?: string;
++  /** Concrete generation captured by the owning turn before delivery. */
++  sessionId?: string;
+   executionIdentityToken?: ExecutionIdentityAdmissionToken;
+ };
+ 
+@@ -214,6 +216,7 @@ async function deliverAdmittedInboundReply(
+   const session = buildOutboundSessionContext({
+     cfg: params.cfg,
+     sessionKey: params.ctxPayload.SessionKey,
++    sessionId: params.sessionId,
+     policySessionKey: params.ctxPayload.RuntimePolicySessionKey,
+     conversationType: params.ctxPayload.ChatType,
+     agentId: params.agentId,
+diff --git a/src/channels/turn/execution.ts b/src/channels/turn/execution.ts
+index 6632985a0..1d5c366c3 100644
+--- a/src/channels/turn/execution.ts
++++ b/src/channels/turn/execution.ts
+@@ -254,6 +254,7 @@ async function runPreparedChannelTurnCoreInTrace<
+       await params.recordInboundSession({
+         storePath: params.storePath,
+         sessionKey: recordSessionKey,
++        expectedSessionId: params.record?.expectedSessionId,
+         ctx: params.ctxPayload,
+         groupResolution: params.record?.groupResolution,
+         createIfMissing: params.record?.createIfMissing,
+diff --git a/src/channels/turn/lifecycle.ts b/src/channels/turn/lifecycle.ts
+index 1c5e6520d..1534ca249 100644
+--- a/src/channels/turn/lifecycle.ts
++++ b/src/channels/turn/lifecycle.ts
+@@ -380,13 +380,19 @@ async function dispatchChannelTurnWithDeliveryOwner(
+   const pendingAttempts: PendingChannelDeliveryAttempt[] = [];
+   const suppressedAttempts: PendingChannelDeliveryAttempt[] = [];
+   let agentRun: [runId?: string, executionIdentityToken?: ExecutionToken] = [];
++  let preparedSessionId = params.record?.expectedSessionId;
+   const onAgentRunStart = replyPipeline.replyOptions?.onAgentRunStart;
++  const onSessionPrepared = replyPipeline.replyOptions?.onSessionPrepared;
+   const replyOptions: NonNullable<AssembledChannelTurn["replyOptions"]> = {
+     ...replyPipeline.replyOptions,
+     onAgentRunStart: (...runStartArgs) => {
+       agentRun = [runStartArgs[0], runStartArgs[1]];
+       return onAgentRunStart?.(...runStartArgs);
+     },
++    onSessionPrepared: (binding) => {
++      preparedSessionId = binding.sessionId;
++      return onSessionPrepared?.(binding);
++    },
+   };
+   const hookCtx = delivery.observeMessageSent
+     ? deriveInboundMessageHookContext(params.ctxPayload)
+@@ -406,6 +412,8 @@ async function dispatchChannelTurnWithDeliveryOwner(
+       to: resolveInboundReplyHookTarget(params.ctxPayload, hookCtx),
+       accountId: params.accountId,
+       sessionKeyForInternalHooks: group?.ctx.SessionKey ?? params.routeSessionKey,
++      sessionId: preparedSessionId,
++      agentId: params.agentId,
+       runId: group ? group.runState.runId : agentRun[0],
+       isGroup: hookCtx.isGroup,
+       groupId: hookCtx.groupId,
+@@ -478,6 +486,7 @@ async function dispatchChannelTurnWithDeliveryOwner(
+         ctxPayload: params.ctxPayload,
+         info,
+         executionIdentityToken: agentRun[1],
++        sessionId: preparedSessionId,
+         ...durableOptions,
+       });
+       if (durable.status === "failed" && isPlatformMessageNotDispatchedError(durable.error)) {
+@@ -584,7 +593,11 @@ async function dispatchChannelTurnWithDeliveryOwner(
+       deliverWithProviderMessageSending:
+         preparedProviderDeliver ?? rawOperation.deliverWithProviderMessageSending,
+       deliverDurable: (value, context) =>
+-        deliverStructuredInboundReplyWithMessageSendContextCore({ ...context, plan: value }),
++        deliverStructuredInboundReplyWithMessageSendContextCore({
++          ...context,
++          sessionId: preparedSessionId,
++          plan: value,
++        }),
+     });
+   return await runPreparedChannelTurnCore(
+     {
+diff --git a/src/channels/turn/types.ts b/src/channels/turn/types.ts
+index 62a5d55f1..4a26647cd 100644
+--- a/src/channels/turn/types.ts
++++ b/src/channels/turn/types.ts
+@@ -240,6 +240,8 @@ export type ChannelTurnDeliveryAdapter =
+   | ChannelProviderOwnedMessageSendingDeliveryAdapter;
+ 
+ export type ChannelTurnRecordOptions = {
++  /** Require an existing, nonarchived session with this exact lifecycle identity. */
++  expectedSessionId?: string;
+   /**
+    * Override the session used for metadata and transcript context.
+    * Must be non-empty and contain no surrounding whitespace.
+@@ -275,7 +277,14 @@ type ChannelTurnDispatcherOptions = Omit<
+ 
+ /** Reply options plus the opaque native command ownership decision carried by channel turns. */
+ type ChannelTurnReplyOptions = Omit<GetReplyOptions, "onBlockReply" | "onPreparedBlockReply"> &
+-  PluginCommandReplyOptions;
++  PluginCommandReplyOptions & {
++    /** Internal delivery provenance captured at session admission. */
++    onSessionPrepared?: (binding: {
++      sessionKey?: string;
++      sessionId: string;
++      storePath?: string;
++    }) => void;
++  };
+ 
+ type ChannelTurnReplyPipelineOptions = Omit<
+   CreateChannelReplyPipelineParams,
+diff --git a/src/config/sessions/runtime-types.ts b/src/config/sessions/runtime-types.ts
+index da8dc30e2..6462f9e41 100644
+--- a/src/config/sessions/runtime-types.ts
++++ b/src/config/sessions/runtime-types.ts
+@@ -4,6 +4,8 @@ import type { DeliveryContext } from "../../utils/delivery-context.types.js";
+ import type { GroupKeyResolution, SessionEntry } from "./types.js";
+ 
+ export type RecordInboundSessionMetaParams = {
++  /** Require an existing, active session with this exact lifecycle identity. */
++  expectedSessionId?: string;
+   /** Set false to only patch existing entries; missing sessions stay absent. */
+   createIfMissing?: boolean;
+   ctx: MsgContext;
+diff --git a/src/config/sessions/session-accessor.sqlite-entry.ts b/src/config/sessions/session-accessor.sqlite-entry.ts
+index f512aef97..92ed0358c 100644
+--- a/src/config/sessions/session-accessor.sqlite-entry.ts
++++ b/src/config/sessions/session-accessor.sqlite-entry.ts
+@@ -648,14 +648,24 @@ export async function recordInboundSessionMeta(
+   const createIfMissing = params.createIfMissing ?? true;
+   return await patchSessionEntryCore(
+     { sessionKey: params.sessionKey, storePath: params.storePath },
+-    (_entry, context) => {
++    (_entry, { existingEntry: existing }) => {
++      if (
++        params.expectedSessionId !== undefined &&
++        (!existing ||
++          existing.sessionId !== params.expectedSessionId ||
++          existing.archivedAt !== undefined)
++      ) {
++        throw new Error(
++          `Inbound route session admission rejected stale or archived session ${params.expectedSessionId}`,
++        );
++      }
+       const metadataPatch = deriveSessionMetaPatch({
+         ctx: params.ctx,
+         sessionKey: params.sessionKey,
+-        existing: context.existingEntry,
++        existing,
+         groupResolution: params.groupResolution,
+       });
+-      if (context.existingEntry) {
++      if (existing) {
+         return metadataPatch;
+       }
+       return {
+diff --git a/src/config/sessions/session-accessor.test.ts b/src/config/sessions/session-accessor.test.ts
+index dccf05149..60c99b9f3 100644
+--- a/src/config/sessions/session-accessor.test.ts
++++ b/src/config/sessions/session-accessor.test.ts
+@@ -381,6 +381,55 @@ describe("session accessor seam", () => {
+     expect(missing).toBeUndefined();
+   });
+ 
++  it.each([
++    { kind: "missing", entry: undefined },
++    { kind: "replaced", entry: { sessionId: "replacement", updatedAt: 1 } },
++    { kind: "archived", entry: { sessionId: "expected", updatedAt: 1, archivedAt: 1 } },
++  ])(
++    "rejects a pinned inbound route for a $kind generation without changing state",
++    async ({ kind, entry }) => {
++      const scope = { sessionKey: `agent:main:pinned-${kind}`, storePath };
++      if (entry) {
++        await upsertSessionEntryCore(scope, entry);
++      }
++      const before = loadSessionEntry(scope);
++      await expect(
++        recordInboundSessionMeta({
++          ...scope,
++          expectedSessionId: "expected",
++          ctx: {
++            Provider: "slack",
++            Surface: "slack",
++            ChatType: "direct",
++            From: "slack:U1",
++            To: "slack:D1",
++            SessionKey: scope.sessionKey,
++          },
++        }),
++      ).rejects.toThrow("Inbound route session admission rejected");
++      expect(loadSessionEntry(scope)).toEqual(before);
++    },
++  );
++
++  it("admits a pinned inbound route for its active concrete generation", async () => {
++    const scope = { sessionKey: "agent:main:pinned-active", storePath };
++    await upsertSessionEntryCore(scope, { sessionId: "expected", updatedAt: 1 });
++    await expect(
++      recordInboundSessionMeta({
++        ...scope,
++        expectedSessionId: "expected",
++        ctx: {
++          Provider: "slack",
++          Surface: "slack",
++          ChatType: "direct",
++          From: "slack:U1",
++          To: "slack:D1",
++          SessionKey: scope.sessionKey,
++        },
++      }),
++    ).resolves.toMatchObject({ sessionId: "expected" });
++  });
++
+   it("preserves activity timestamps across inbound meta and last-route updates", async () => {
+     const sessionKey = "agent:main:webchat:dm:user-2";
+     const anchorUpdatedAt = Date.now() - 60_000;
+diff --git a/src/cron/isolated-agent/delivery-dispatch.double-announce.test.ts b/src/cron/isolated-agent/delivery-dispatch.double-announce.test.ts
+index 166e79399..7b20c9710 100644
+--- a/src/cron/isolated-agent/delivery-dispatch.double-announce.test.ts
++++ b/src/cron/isolated-agent/delivery-dispatch.double-announce.test.ts
+@@ -1136,7 +1136,9 @@ describe("dispatchCronDelivery", () => {
+       expect(buildOutboundSessionContext).toHaveBeenCalledWith({
+         cfg: params.cfgWithAgentDefaults,
+         agentId: "main",
+-        sessionKey: `agent:main:work${suffix}`,
++        sessionKey: params.agentSessionKey,
++        sessionId: params.sessionId,
++        policySessionKey: `agent:main:work${suffix}`,
+       });
+       expect(ensureOutboundSessionEntry).toHaveBeenCalledWith({
+         sourceSessionKey: "agent:main:cron:test-job",
+@@ -1906,6 +1908,8 @@ describe("dispatchCronDelivery", () => {
+       cfg: params.cfgWithAgentDefaults,
+       agentId: "main",
+       sessionKey: "agent:main:session:daily-report",
++      sessionId: params.sessionId,
++      policySessionKey: "agent:main:session:daily-report",
+     });
+     expect(appendAssistantMessageToSessionTranscript).toHaveBeenCalledWith({
+       sessionKey: "agent:main:session:daily-report",
+diff --git a/src/cron/isolated-agent/delivery-dispatch.ts b/src/cron/isolated-agent/delivery-dispatch.ts
+index 25dc6b699..b0695ce1d 100644
+--- a/src/cron/isolated-agent/delivery-dispatch.ts
++++ b/src/cron/isolated-agent/delivery-dispatch.ts
+@@ -297,15 +297,18 @@ export async function dispatchCronDelivery(
+       const deliverySession = buildOutboundSessionContext({
+         cfg: params.cfgWithAgentDefaults,
+         agentId: params.agentId,
+-        sessionKey: deliverySessionKey,
+-      });
+-      const awarenessMainSessionKey = resolveCronAwarenessMainSessionKey({
+-        cfg: params.cfgWithAgentDefaults,
+-        agentId: params.agentId,
++        // Keep the run session as the lifecycle identity while the resolved
++        // delivery route remains the policy/destination key.
++        sessionKey: params.agentSessionKey,
++        policySessionKey: deliverySessionKey,
++        sessionId: params.sessionId,
+       });
+       const mirrorTargetsAwarenessMainSession = isSameSessionKey(
+         deliverySessionKey,
+-        awarenessMainSessionKey,
++        resolveCronAwarenessMainSessionKey({
++          cfg: params.cfgWithAgentDefaults,
++          agentId: params.agentId,
++        }),
+       );
+       const mirrorTargetsDeletingRunSession =
+         params.job.deleteAfterRun === true &&
+@@ -470,8 +473,7 @@ export async function dispatchCronDelivery(
+       });
+       const targetSessionAwarenessText =
+         !params.deliveryBestEffort &&
+-        (shouldQueueAwarenessForDelivery ||
+-          !isSameSessionKey(deliverySessionKey, awarenessMainSessionKey))
++        (shouldQueueAwarenessForDelivery || !mirrorTargetsAwarenessMainSession)
+           ? deliveryAwarenessText
+           : undefined;
+       // For explicit isolated deliveries that resolve to the main session, the
+diff --git a/src/hooks/message-hook-mappers.ts b/src/hooks/message-hook-mappers.ts
+index 0377156d0..4a484af77 100644
+--- a/src/hooks/message-hook-mappers.ts
++++ b/src/hooks/message-hook-mappers.ts
+@@ -30,7 +30,17 @@ import type {
+ import { projectMessageHookMediaFacts, type MessageHookMediaFact } from "./message-hook-media.js";
+ 
+ type CanonicalSentMessageHookContext = MessageSentHookContext &
+-  Pick<PluginHookMessageContext, "sessionKey" | "runId" | "trace" | "callDepth">;
++  Pick<
++    PluginHookMessageContext,
++    | "sessionKey"
++    | "sessionId"
++    | "workspaceId"
++    | "agentId"
++    | "threadId"
++    | "runId"
++    | "trace"
++    | "callDepth"
++  >;
+ 
+ function projectHookMediaAliases(canonical: CanonicalInboundMessageHookContext) {
+   const media = canonical.mediaStagingPending ? undefined : canonical;
+@@ -275,6 +285,10 @@ export function buildCanonicalSentMessageHookContext(
+     accountId: params.accountId,
+     conversationId: params.conversationId ?? params.to,
+     sessionKey: params.sessionKey,
++    sessionId: params.sessionId,
++    workspaceId: params.workspaceId,
++    agentId: params.agentId,
++    threadId: params.threadId,
+     runId: params.runId,
+     messageId: params.messageId,
+     trace: params.trace,
+@@ -356,6 +370,18 @@ export function toPluginMessageContext(
+   if (canonical.sessionKey) {
+     context.sessionKey = canonical.sessionKey;
+   }
++  if ("sessionId" in canonical && canonical.sessionId) {
++    context.sessionId = canonical.sessionId;
++  }
++  if ("workspaceId" in canonical && canonical.workspaceId) {
++    context.workspaceId = canonical.workspaceId;
++  }
++  if (canonical.agentId) {
++    context.agentId = canonical.agentId;
++  }
++  if ("threadId" in canonical && canonical.threadId !== undefined) {
++    context.threadId = String(canonical.threadId);
++  }
+   if (canonical.runId) {
+     context.runId = canonical.runId;
+   }
+@@ -506,6 +532,10 @@ export function toPluginMessageSentEvent(
+     success: canonical.success,
+     ...(canonical.messageId ? { messageId: canonical.messageId } : {}),
+     ...(canonical.sessionKey ? { sessionKey: canonical.sessionKey } : {}),
++    ...(canonical.sessionId ? { sessionId: canonical.sessionId } : {}),
++    ...(canonical.workspaceId ? { workspaceId: canonical.workspaceId } : {}),
++    ...(canonical.agentId ? { agentId: canonical.agentId } : {}),
++    ...(canonical.threadId ? { threadId: canonical.threadId } : {}),
+     ...(canonical.runId ? { runId: canonical.runId } : {}),
+     ...(canonical.error ? { error: canonical.error } : {}),
+   };
+diff --git a/src/infra/heartbeat-dispatch.ts b/src/infra/heartbeat-dispatch.ts
+index 02214439f..eeaf15d55 100644
+--- a/src/infra/heartbeat-dispatch.ts
++++ b/src/infra/heartbeat-dispatch.ts
+@@ -84,6 +84,8 @@ type HeartbeatDispatch = {
+   deliverySilent?: boolean;
+   projectTarget?: boolean;
+   publicationSourceText?: string;
++  /** Concrete generation captured by the owning heartbeat run. */
++  sessionId?: string;
+   prepareReply: NonNullable<ReplyOperationRunState["heartbeat"]>["prepareReply"];
+ };
+ 
+@@ -622,6 +624,7 @@ export async function deliverHeartbeatDispatch(
+         agentId,
+         sessionKey: runSessionKey,
+         policySessionKey: outboundPolicySessionKey,
++        sessionId: policy.sessionId,
+       }),
+       identity: resolveAgentOutboundIdentity(cfg, agentId),
+       deps: policy.opts.deps,
+diff --git a/src/infra/heartbeat-runner-run.ts b/src/infra/heartbeat-runner-run.ts
+index 62942bb2c..ba8c37163 100644
+--- a/src/infra/heartbeat-runner-run.ts
++++ b/src/infra/heartbeat-runner-run.ts
+@@ -51,6 +51,9 @@ export async function runHeartbeatOnce(opts: HeartbeatRunOptions): Promise<Heart
+   }
+   const { cfg, agentId, heartbeat, startedAt } = wake;
+   const { delivery, visibility, sender, runSessionKey, suppressOriginatingContext } = prepared;
++  const expectedExistingSessionId = prepared.genericEvents.find(
++    (event) => event.expectedSessionId !== undefined,
++  )?.expectedSessionId;
+   if (!visibility.showAlerts && !visibility.showOk && !visibility.useIndicator) {
+     emitHeartbeatEvent({
+       status: "skipped",
+@@ -162,6 +165,12 @@ export async function runHeartbeatOnce(opts: HeartbeatRunOptions): Promise<Heart
+         {
+           isHeartbeat: true,
+           useHeartbeatFailureCopy: prepared.useHeartbeatFailureCopy,
++          ...(expectedExistingSessionId
++            ? {
++                expectedExistingSessionId,
++                pinExpectedExistingSession: true,
++              }
++            : {}),
+           // Isolated heartbeats mint a fresh session ID per run, so nothing later
+           // reuses this run's bundle MCP runtime; retire it at settlement.
+           ...(prepared.run.kind === "isolated" ? { cleanupBundleMcpOnRunEnd: true } : {}),
+@@ -195,6 +204,7 @@ export async function runHeartbeatOnce(opts: HeartbeatRunOptions): Promise<Heart
+           suppressDefaultToolProgressMessages: true,
+           onModelSelected: prepared.replyPrefix.onModelSelected,
+           onSessionPrepared: (binding) => {
++            policy.sessionId = binding.sessionId;
+             // Capture initialization's exact identity once; later replacements cannot inherit delivery.
+             if (
+               !policy.prepared.policySessionEntry &&
+diff --git a/src/infra/outbound/deliver-core.ts b/src/infra/outbound/deliver-core.ts
+index 584b95810..d31e67031 100644
+--- a/src/infra/outbound/deliver-core.ts
++++ b/src/infra/outbound/deliver-core.ts
+@@ -38,6 +38,7 @@ import {
+   planOutboundTextMessageUnits,
+   type OutboundMessageSendOverrides,
+ } from "./message-plan.js";
++import type { MessageSentEvent } from "./message-sent-hook.js";
+ import type { NormalizedOutboundPayload } from "./payloads.js";
+ import {
+   acceptedPreparedOutboundEntries,
+@@ -47,6 +48,43 @@ import { createReplyToDeliveryPolicy } from "./reply-policy.js";
+ 
+ const log = createSubsystemLogger("outbound/deliver");
+ 
++function messageSentPlatformIds(result: OutboundDeliveryResult): string[] {
++  return [
++    ...new Set([
++      result.messageId,
++      ...(result.receipt?.platformMessageIds ?? []),
++      ...(result.receipt?.parts.map((part) => part.platformMessageId) ?? []),
++    ]),
++  ].filter((identifier) =>
++    Boolean(identifier && identifier !== "unknown" && identifier !== "suppressed"),
++  );
++}
++
++function messageSentDestination(
++  channel: string,
++  results: readonly OutboundDeliveryResult[],
++): Pick<MessageSentEvent, "conversationId" | "workspaceId"> {
++  // Slack's adapter commits the concrete D/C/G in result.target. Keep every
++  // other channel's historical transport channel id and never infer a Slack
++  // destination from the requested `to` string after the send.
++  if (channel !== "slack") {
++    return {};
++  }
++  const result = results.at(-1);
++  const destination = result?.target?.id?.trim();
++  if (!destination) {
++    return {};
++  }
++  const workspaceId =
++    typeof result?.meta?.workspaceId === "string" && result.meta.workspaceId.trim()
++      ? result.meta.workspaceId.trim()
++      : undefined;
++  return {
++    conversationId: destination,
++    ...(workspaceId ? { workspaceId } : {}),
++  };
++}
++
+ export async function deliverOutboundPayloadsCore(
+   params: DeliverOutboundPayloadsCoreParams,
+ ): Promise<OutboundDeliveryResult[]> {
+@@ -222,13 +260,22 @@ export async function deliverOutboundPayloadsCore(
+     let deliveryStartedAt = 0;
+     let deliveryPending = false;
+     let messageSentEventRecorded = false;
++    const messageSentEventMessageIds = new Set<string>();
+     const recordMessageSentEvent = (
+       event: Parameters<NonNullable<typeof params.onMessageSentEvent>>[0],
+     ): void => {
+-      if (messageSentEventRecorded) {
++      if (messageSentEventRecorded && params.channel !== "slack") {
+         return;
+       }
+-      messageSentEventRecorded = true;
++      if (params.channel === "slack" && event.messageId) {
++        if (messageSentEventMessageIds.has(event.messageId)) {
++          return;
++        }
++        messageSentEventMessageIds.add(event.messageId);
++      }
++      if (params.channel !== "slack") {
++        messageSentEventRecorded = true;
++      }
+       params.onMessageSentEvent?.(event, payloadIndex);
+     };
+     const startDeliveryDiagnostics = (kind: DiagnosticMessageDeliveryKind) => {
+@@ -416,11 +463,24 @@ export async function deliverOutboundPayloadsCore(
+       const lastMessageId = mediaMessageIds
+         ? mediaMessageIds.last
+         : deliveredResults.at(-1)?.messageId;
+-      recordMessageSentEvent({
+-        success: deliveredResults.length > 0,
+-        content: payloadSummary.hookContent ?? payloadSummary.text,
+-        messageId: lastMessageId,
+-      });
++      if (params.channel === "slack") {
++        for (const result of deliveredResults) {
++          for (const messageId of messageSentPlatformIds(result)) {
++            recordMessageSentEvent({
++              success: true,
++              content: payloadSummary.hookContent ?? payloadSummary.text,
++              messageId,
++              ...messageSentDestination(params.channel, [result]),
++            });
++          }
++        }
++      } else {
++        recordMessageSentEvent({
++          success: deliveredResults.length > 0,
++          content: payloadSummary.hookContent ?? payloadSummary.text,
++          messageId: lastMessageId,
++        });
++      }
+       await maybePinDeliveredMessage({
+         handler: deliveryHandler,
+         payload: effectivePayload,
+@@ -472,14 +532,29 @@ export async function deliverOutboundPayloadsCore(
+       // A completed provider send records success before optional pin/notify
+       // bookkeeping. Reaching this fallback first means the logical payload's
+       // provider fan-out itself was incomplete, even if an earlier part sent.
+-      recordMessageSentEvent({
+-        success: false,
+-        content: payloadSummary.hookContent ?? payloadSummary.text,
+-        error: formatErrorMessage(err),
+-        ...(failedPayloadResults.at(-1)?.messageId
+-          ? { messageId: failedPayloadResults.at(-1)!.messageId }
+-          : {}),
+-      });
++      if (params.channel === "slack" && failedPayloadResults.length > 0) {
++        for (const result of failedPayloadResults) {
++          for (const messageId of messageSentPlatformIds(result)) {
++            recordMessageSentEvent({
++              // Earlier chunks remain committed when later work fails.
++              success: true,
++              content: payloadSummary.hookContent ?? payloadSummary.text,
++              error: formatErrorMessage(err),
++              messageId,
++              ...messageSentDestination(params.channel, [result]),
++            });
++          }
++        }
++      } else {
++        recordMessageSentEvent({
++          success: false,
++          content: payloadSummary.hookContent ?? payloadSummary.text,
++          error: formatErrorMessage(err),
++          ...(failedPayloadResults.at(-1)?.messageId
++            ? { messageId: failedPayloadResults.at(-1)!.messageId }
++            : {}),
++        });
++      }
+       if (!params.bestEffort) {
+         throw err instanceof OutboundDeliveryError
+           ? err
+diff --git a/src/infra/outbound/deliver-queue.ts b/src/infra/outbound/deliver-queue.ts
+index a478ae73c..336442f36 100644
+--- a/src/infra/outbound/deliver-queue.ts
++++ b/src/infra/outbound/deliver-queue.ts
+@@ -278,6 +278,8 @@ async function runOutboundDeliveryWithQueue(
+         to,
+         accountId: params.accountId,
+         sessionKeyForInternalHooks: params.mirror?.sessionKey ?? params.session?.key,
++        sessionId: params.mirror?.expectedSessionId,
++        agentId: params.session?.agentId ?? params.mirror?.agentId,
+         isGroup: params.mirror?.isGroup,
+         groupId: params.mirror?.groupId,
+         runId: params.replyPayloadSendingHook?.runId,
+diff --git a/src/infra/outbound/deliver.test.ts b/src/infra/outbound/deliver.test.ts
+index db71d1d34..38baccdfb 100644
+--- a/src/infra/outbound/deliver.test.ts
++++ b/src/infra/outbound/deliver.test.ts
+@@ -2742,6 +2742,108 @@ describe("deliverOutboundPayloads", () => {
+     },
+   );
+ 
++  it("retains the origin of a committed Slack chunk when a later chunk fails", async () => {
++    hookMocks.runner.hasHooks.mockImplementation((name?: string) => name === "message_sent");
++    const committed = {
++      channel: "slack" as const,
++      messageId: "123.456",
++      target: { kind: "channel" as const, id: "D123" },
++      meta: { workspaceId: "T123" },
++    };
++    const sendFormattedText = vi.fn(
++      async (context: {
++        onDeliveryResult?: (result: typeof committed) => Promise<void> | void;
++      }) => {
++        await context.onDeliveryResult?.(committed);
++        throw new Error("second Slack chunk failed");
++      },
++    );
++    setTestOutbound({ sendText: async () => committed, sendFormattedText }, "slack");
++    await deliverOutboundPayloads({
++      cfg: {},
++      channel: "slack",
++      to: "user:U123",
++      payloads: [{ text: "first and second chunks" }],
++      bestEffort: true,
++      skipQueue: true,
++      session: { key: "agent:main:origin", agentId: "main" },
++      mirror: { sessionKey: "agent:main:origin", expectedSessionId: "generation-1" },
++    });
++    expect(hookMocks.runner.runMessageSent).toHaveBeenCalledExactlyOnceWith(
++      expect.objectContaining({ messageId: "123.456", success: true }),
++      expect.objectContaining({
++        channelId: "slack",
++        conversationId: "D123",
++        workspaceId: "T123",
++        sessionId: "generation-1",
++      }),
++    );
++  });
++
++  it("records every physical Slack message in an aggregate receipt", async () => {
++    hookMocks.runner.hasHooks.mockReturnValue(true);
++    installTextOutbound(
++      {
++        channel: "slack",
++        messageId: "second",
++        target: { kind: "channel", id: "D123" },
++        meta: { workspaceId: "T123" },
++        receipt: { platformMessageIds: ["first", "second"], parts: [], sentAt: Date.now() },
++      },
++      {},
++      "slack",
++    );
++    await deliverOutboundPayloads({
++      cfg: {},
++      channel: "slack",
++      to: "user:U123",
++      payloads: [{ text: "two chunks" }],
++      mirror: { sessionKey: "agent:main:origin", expectedSessionId: "generation-1" },
++    });
++    expect(hookMocks.runner.runMessageSent).toHaveBeenCalledTimes(2);
++    for (const messageId of ["first", "second"]) {
++      expect(hookMocks.runner.runMessageSent).toHaveBeenCalledWith(
++        expect.objectContaining({ messageId, success: true }),
++        expect.objectContaining({
++          channelId: "slack",
++          conversationId: "D123",
++          workspaceId: "T123",
++          sessionId: "generation-1",
++        }),
++      );
++    }
++  });
++
++  it("emits committed Slack destination and captured command session without a mirror", async () => {
++    hookMocks.runner.hasHooks.mockReturnValue(true);
++    installTextOutbound(
++      { messageId: "slack-ts-1", target: { kind: "channel", id: "D123" } },
++      {},
++      "slack",
++    );
++
++    await deliverOutboundPayloads({
++      cfg: {},
++      channel: "slack",
++      to: "user:U123",
++      accountId: "workspace-account",
++      payloads: [{ text: "heartbeat" }],
++      session: { key: "agent:main:slack:dm", agentId: "main", sessionId: "generation-7" },
++    });
++
++    expect(hookMocks.runner.runMessageSent).toHaveBeenCalledWith(
++      expect.objectContaining({ to: "user:U123", success: true }),
++      expect.objectContaining({
++        channelId: "slack",
++        conversationId: "D123",
++        accountId: "workspace-account",
++        sessionKey: "agent:main:slack:dm",
++        sessionId: "generation-7",
++        agentId: "main",
++      }),
++    );
++  });
++
+   it("emits message_sent only after the durable queue terminal commits", async () => {
+     hookMocks.runner.hasHooks.mockImplementation((name?: string) => name === "message_sent");
+     let releaseAck: (() => void) | undefined;
+diff --git a/src/infra/outbound/message-sent-hook.ts b/src/infra/outbound/message-sent-hook.ts
+index 9babcc1f8..344caaa1d 100644
+--- a/src/infra/outbound/message-sent-hook.ts
++++ b/src/infra/outbound/message-sent-hook.ts
+@@ -19,6 +19,9 @@ export type MessageSentEvent = {
+   content: string;
+   error?: string;
+   messageId?: string;
++  /** Provider-committed destination facts. These must come from the adapter result. */
++  conversationId?: string;
++  workspaceId?: string;
+ };
+ 
+ /** Creates a best-effort emitter shared by direct and inbound-turn delivery owners. */
+@@ -28,6 +31,9 @@ export function createMessageSentEmitter(params: {
+   to: string;
+   accountId?: string;
+   sessionKeyForInternalHooks?: string;
++  sessionId?: string;
++  agentId?: string;
++  workspaceId?: string;
+   runId?: string;
+   isGroup?: boolean;
+   groupId?: string;
+@@ -47,10 +53,13 @@ export function createMessageSentEmitter(params: {
+       error: event.error,
+       channelId: params.channel,
+       accountId: params.accountId,
+-      conversationId: params.to,
++      conversationId: event.conversationId ?? params.to,
+       // Reuse the canonical runtime session key for plugin/internal correlation; policy keys
+       // describe the delivery target and must never leak into this lifecycle identity.
+       sessionKey: params.sessionKeyForInternalHooks,
++      sessionId: params.sessionId,
++      workspaceId: event.workspaceId ?? params.workspaceId,
++      agentId: params.agentId,
+       runId: params.runId,
+       messageId: event.messageId,
+       isGroup: params.isGroup,
+@@ -105,6 +114,8 @@ export function createOutboundMessageSentEmitter(
+       to: params.to,
+       accountId: params.accountId,
+       sessionKeyForInternalHooks,
++      sessionId: params.session?.sessionId ?? params.mirror?.expectedSessionId,
++      agentId: params.session?.agentId ?? params.mirror?.agentId,
+       isGroup: params.mirror?.isGroup,
+       groupId: params.mirror?.groupId,
+       runId: params.preparedBatch?.runId,
+diff --git a/src/infra/outbound/message.ts b/src/infra/outbound/message.ts
+index 1e4dad048..73f5f1c0a 100644
+--- a/src/infra/outbound/message.ts
++++ b/src/infra/outbound/message.ts
+@@ -296,11 +296,16 @@ export async function sendMessage(params: MessageSendParams): Promise<MessageSen
+ 
+   if (deliveryMode !== "gateway" || params.gatewayOwnedDelivery === true) {
+     const resolvedTarget = resolveDirectMessageTarget(params, cfg, channel, plugin);
++    const outboundSessionKey = params.requesterSessionKey ?? params.mirror?.sessionKey;
++    const mirrorOwnsOutboundKey =
++      params.mirror?.expectedSessionId !== undefined &&
++      params.mirror.sessionKey === outboundSessionKey;
+ 
+     const outboundSession = buildOutboundSessionContext({
+       cfg,
+       agentId: params.agentId,
+-      sessionKey: params.requesterSessionKey ?? params.mirror?.sessionKey,
++      sessionKey: outboundSessionKey,
++      ...(mirrorOwnsOutboundKey ? { sessionId: params.mirror?.expectedSessionId } : {}),
+       conversationType: params.conversationType,
+       requesterAccountId: params.requesterAccountId ?? params.accountId,
+       requesterSenderId: params.requesterSenderId,
+diff --git a/src/infra/outbound/session-context.test.ts b/src/infra/outbound/session-context.test.ts
+index f5baa0ca1..980e40e8f 100644
+--- a/src/infra/outbound/session-context.test.ts
++++ b/src/infra/outbound/session-context.test.ts
+@@ -21,6 +21,22 @@ beforeEach(() => {
+ });
+ 
+ describe("buildOutboundSessionContext", () => {
++  it("retains the concrete generation captured by the sending run", () => {
++    resolveSessionAgentIdMock.mockReturnValueOnce("main");
++    expect(
++      buildOutboundSessionContext({
++        cfg: {},
++        sessionKey: "agent:main:source",
++        sessionId: "generation-original",
++        agentId: "main",
++      }),
++    ).toMatchObject({
++      key: "agent:main:source",
++      sessionId: "generation-original",
++      agentId: "main",
++    });
++  });
++
+   it("returns undefined when both session key and agent id are blank", () => {
+     expect(
+       buildOutboundSessionContext({
+diff --git a/src/infra/outbound/session-context.ts b/src/infra/outbound/session-context.ts
+index 00a675224..e364de250 100644
+--- a/src/infra/outbound/session-context.ts
++++ b/src/infra/outbound/session-context.ts
+@@ -8,6 +8,8 @@ import { parseSessionDeliveryRoute } from "../../routing/session-key.js";
+ import type { SilentReplyConversationType } from "../../shared/silent-reply-policy.js";
+ 
+ export type OutboundSessionContext = {
++  /** Concrete session generation captured before the outbound send. */
++  sessionId?: string;
+   /**
+    * Canonical session key used for internal hook dispatch.
+    *
+@@ -61,6 +63,7 @@ export type OutboundSessionContext = {
+ export function buildOutboundSessionContext(params: {
+   cfg: OpenClawConfig;
+   sessionKey?: string | null;
++  sessionId?: string | null;
+   policySessionKey?: string | null;
+   conversationType?: string | null;
+   isGroup?: boolean | null;
+@@ -95,6 +98,9 @@ export function buildOutboundSessionContext(params: {
+     : explicitAgentId;
+   const context: OutboundSessionContext = {
+     ...(key ? { key } : {}),
++    ...(normalizeOptionalString(params.sessionId)
++      ? { sessionId: normalizeOptionalString(params.sessionId) }
++      : {}),
+     ...(policyKey ? { policyKey } : {}),
+     ...(conversationType ? { conversationType } : {}),
+     ...(conversationKind ? { conversationKind } : {}),
+diff --git a/src/infra/system-events.test.ts b/src/infra/system-events.test.ts
+index 027b61238..a0016c5d5 100644
+--- a/src/infra/system-events.test.ts
++++ b/src/infra/system-events.test.ts
+@@ -40,6 +40,20 @@ describe("delivery-owned system event selection", () => {
+   beforeEach(() => resetSystemEventsForTest());
+   afterEach(() => resetSystemEventsForTest());
+ 
++  it("retains the generation pin on queued events", () => {
++    const event = expectDefined(
++      enqueueSystemEventEntry("Pinned notice", {
++        sessionKey: "agent:main:pinned-event",
++        expectedSessionId: "session-generation-1",
++      }),
++      "pinned event",
++    );
++    expect(event.expectedSessionId).toBe("session-generation-1");
++    expect(peekSystemEventEntries("agent:main:pinned-event")[0]?.expectedSessionId).toBe(
++      "session-generation-1",
++    );
++  });
++
+   it.each(["cancel", "release"] as const)(
+     "%s settles surviving batch members after one occurrence disappears",
+     (action) => {
+diff --git a/src/infra/system-events.ts b/src/infra/system-events.ts
+index f909b949a..66e4fe2ac 100644
+--- a/src/infra/system-events.ts
++++ b/src/infra/system-events.ts
+@@ -45,6 +45,7 @@ export type SystemEvent = {
+   /** Queued by work a conversation turn started, not heartbeat or automation work. */
+   fromConversationTurn?: true;
+   sessionStorePath?: string | null;
++  expectedSessionId?: string;
+ };
+ 
+ const MAX_EVENTS = 20;
+@@ -121,6 +122,7 @@ registerSystemEventStoreOwner(SYSTEM_EVENT_QUEUES_KEY, () => {
+ type SystemEventOptions = {
+   sessionKey: string;
+   sessionStorePath?: string | null;
++  expectedSessionId?: string;
+   contextKey?: string | null;
+   deliveryContext?: DeliveryContext;
+   fromConversationTurn?: boolean;
+@@ -275,6 +277,9 @@ function enqueueOwnedSystemEventEntry(
+       text: cleaned,
+       ts: Date.now(),
+       ...(sessionStorePath === undefined ? {} : { sessionStorePath }),
++      ...(options.expectedSessionId === undefined
++        ? {}
++        : { expectedSessionId: options.expectedSessionId }),
+       contextKey: normalizedContextKey,
+       deliveryContext: normalizedDeliveryContext,
+       ...(options.fromConversationTurn ? { fromConversationTurn: true as const } : {}),
+diff --git a/src/plugin-sdk/plugin-entry.ts b/src/plugin-sdk/plugin-entry.ts
+index b9396f404..d3ab28ad6 100644
+--- a/src/plugin-sdk/plugin-entry.ts
++++ b/src/plugin-sdk/plugin-entry.ts
+@@ -188,6 +188,8 @@ export type {
+   PluginHookMediaFact,
+   PluginHookMessageReceivedEvent,
+   PluginHookProviderUpdate,
++  PluginHookResolveInboundRouteEvent,
++  PluginHookResolveInboundRouteResult,
+   PluginHookSkillArtifact,
+   PluginHookSkillChangedEvent,
+   PluginHookSkillContext,
+diff --git a/src/plugin-sdk/test-helpers/plugin-runtime-mock.ts b/src/plugin-sdk/test-helpers/plugin-runtime-mock.ts
+index ce58628f9..df48bbbb5 100644
+--- a/src/plugin-sdk/test-helpers/plugin-runtime-mock.ts
++++ b/src/plugin-sdk/test-helpers/plugin-runtime-mock.ts
+@@ -757,6 +757,7 @@ export function createPluginRuntimeMock(overrides: PluginRuntimeMockOverrides =
+         >(() => ({})),
+       },
+       routing: {
++        inboundRouteContractVersion: 1,
+         buildAgentSessionKey: vi.fn<PluginRuntime["channel"]["routing"]["buildAgentSessionKey"]>(
+           ({ agentId, channel, peer }) =>
+             `agent:${agentId}:${channel}:${peer?.kind ?? "direct"}:${peer?.id ?? "peer"}`,
+@@ -770,6 +771,9 @@ export function createPluginRuntimeMock(overrides: PluginRuntimeMockOverrides =
+           lastRoutePolicy: "session",
+           matchedBy: "default",
+         })),
++        resolveInboundRoute: vi.fn<PluginRuntime["channel"]["routing"]["resolveInboundRoute"]>(
++          async () => undefined,
++        ),
+       },
+       pairing: {
+         buildPairingReply: vi.fn<PluginRuntime["channel"]["pairing"]["buildPairingReply"]>(
+diff --git a/src/plugin-sdk/test-helpers/plugin-runtime-model-mock.ts b/src/plugin-sdk/test-helpers/plugin-runtime-model-mock.ts
+index 614e6e37c..8f653325a 100644
+--- a/src/plugin-sdk/test-helpers/plugin-runtime-model-mock.ts
++++ b/src/plugin-sdk/test-helpers/plugin-runtime-model-mock.ts
+@@ -1,5 +1,6 @@
+ import { vi } from "vitest";
+ import { resolveModelRuntimePolicy } from "../../agents/model-runtime-policy.js";
++import { resolveUtilityModelRefForAgent } from "../../agents/utility-model.js";
+ import type { PluginRuntime } from "../../plugins/runtime/types.js";
+ 
+ export function createPluginModelRuntimeMock(
+@@ -17,6 +18,7 @@ export function createPluginModelRuntimeMock(
+         vi.fn<PluginRuntime["modelConfig"]["resolveDefaultModelForAgent"]>(),
+       resolveAllowedModelRef: vi.fn<PluginRuntime["modelConfig"]["resolveAllowedModelRef"]>(),
+       resolveModelRuntimePolicy: vi.fn(resolveModelRuntimePolicy),
++      resolveUtilityModelRefForAgent: vi.fn(resolveUtilityModelRefForAgent),
+     },
+     modelAuth: {
+       resolveProviderIdForAuth: vi.fn<PluginRuntime["modelAuth"]["resolveProviderIdForAuth"]>(
+diff --git a/src/plugins/hook-message.types.ts b/src/plugins/hook-message.types.ts
+index 567f3611b..79c4d245d 100644
+--- a/src/plugins/hook-message.types.ts
++++ b/src/plugins/hook-message.types.ts
+@@ -80,6 +80,10 @@ export type PluginHookMessageContext = {
+    * it as optional.
+    */
+   sessionKey?: string;
++  sessionId?: string;
++  workspaceId?: string;
++  agentId?: string;
++  threadId?: string;
+   /**
+    * Per-turn run identifier (UUID), unique to one end-to-end agent turn:
+    * stable across all LLM-call iterations, retry attempts (compaction,
+@@ -112,6 +116,46 @@ export type PluginHookMessageContext = {
+   callDepth?: number;
+ };
+ 
++/** Host admission input for a channel-owned pre-admission route decision. */
++export type PluginHookResolveInboundRouteEvent = {
++  channel: string;
++  accountId: string;
++  workspaceId: string;
++  conversationId: string;
++  senderId: string;
++  messageId: string;
++  content: string;
++  isDirect: boolean;
++  replyToId?: string;
++  threadId?: string;
++  agentId: string;
++  sessionKey: string;
++  signal?: AbortSignal;
++  interaction?: {
++    kind: string;
++    messageTs?: string;
++    actionId?: string;
++    viewId?: string;
++    callbackId?: string;
++    reference?: string;
++    privateMetadata?: string;
++    query?: string;
++  };
++};
++
++/** A concrete existing session selected by a trusted inbound route policy. */
++export type PluginHookResolveInboundRouteResult =
++  | {
++      agentId: string;
++      sessionKey: string;
++      expectedSessionId: string;
++      reason?: string;
++    }
++  | {
++      drop: { reason: string };
++      reason?: string;
++    };
++
+ export type PluginHookInboundClaimContext = PluginHookMessageContext & {
+   /** Resolved owner for session scopes whose canonical key does not encode an agent id. */
+   agentId?: string;
+@@ -190,6 +234,10 @@ export type PluginHookMessageSentEvent = {
+   success: boolean;
+   messageId?: string;
+   sessionKey?: string;
++  sessionId?: string;
++  workspaceId?: string;
++  agentId?: string;
++  threadId?: string;
+   runId?: string;
+   trace?: DiagnosticTraceContext;
+   traceId?: string;
+diff --git a/src/plugins/hook-types.ts b/src/plugins/hook-types.ts
+index 471987b32..3a26df669 100644
+--- a/src/plugins/hook-types.ts
++++ b/src/plugins/hook-types.ts
+@@ -37,6 +37,8 @@ import type {
+   PluginHookMessageSendingEvent,
+   PluginHookMessageSendingResult,
+   PluginHookMessageSentEvent,
++  PluginHookResolveInboundRouteEvent,
++  PluginHookResolveInboundRouteResult,
+ } from "./hook-message.types.js";
+ import type { PluginHookReplyDispatchEvent } from "./hook-reply-dispatch-event.types.js";
+ import type { PluginHookSkillChangedEvent, PluginHookSkillContext } from "./hook-skill.types.js";
+@@ -83,6 +85,8 @@ export type {
+   PluginHookMediaFact,
+   PluginHookMessageReceivedEvent,
+   PluginHookProviderUpdate,
++  PluginHookResolveInboundRouteEvent,
++  PluginHookResolveInboundRouteResult,
+ } from "./hook-message.types.js";
+ export {
+   PluginApprovalResolutions,
+@@ -136,6 +140,7 @@ const PLUGIN_HOOK_NAMES = [
+   "before_install",
+   "before_agent_run",
+   "resolve_exec_env",
++  "resolve_inbound_route",
+ ] as const;
+ 
+ export type PluginHookName = (typeof PLUGIN_HOOK_NAMES)[number];
+@@ -945,6 +950,11 @@ export type PluginHookHandlerMap = {
+     PluginHookResolveExecEnvContext,
+     Record<string, string>
+   >;
++  resolve_inbound_route: AsyncPluginHook<
++    PluginHookResolveInboundRouteEvent,
++    PluginHookResolveInboundRouteEvent,
++    PluginHookResolveInboundRouteResult
++  >;
+ };
+ 
+ export type PluginHookRegistration<K extends PluginHookName = PluginHookName> = {
+diff --git a/src/plugins/hooks.resolve-inbound-route.test.ts b/src/plugins/hooks.resolve-inbound-route.test.ts
+new file mode 100644
+index 000000000..15182e588
+--- /dev/null
++++ b/src/plugins/hooks.resolve-inbound-route.test.ts
+@@ -0,0 +1,80 @@
++import { afterEach, describe, expect, it } from "vitest";
++import { initializeGlobalHookRunner, resetGlobalHookRunner } from "./hook-runner-global.js";
++import { createHookRunner } from "./hooks.js";
++import { addTestHook } from "./hooks.test-helpers.js";
++import { createEmptyPluginRegistry } from "./registry.js";
++import { getActivePluginRegistry, setActivePluginRegistry } from "./runtime.js";
++import { withPluginRuntimeGenerationRegistryScope } from "./runtime/generation-state.js";
++import { createRuntimeChannel } from "./runtime/runtime-channel.js";
++import type {
++  PluginHookResolveInboundRouteEvent,
++  PluginHookResolveInboundRouteResult,
++  PluginHookRegistration,
++} from "./types.js";
++
++const event: PluginHookResolveInboundRouteEvent = {
++  channel: "slack",
++  accountId: "default",
++  workspaceId: "T1",
++  conversationId: "C1",
++  senderId: "U1",
++  messageId: "M1",
++  content: "hello",
++  isDirect: false,
++  agentId: "main",
++  sessionKey: "agent:main:slack:channel:C1",
++};
++
++describe("resolve_inbound_route hook", () => {
++  const originalRegistry = getActivePluginRegistry();
++  afterEach(() => {
++    resetGlobalHookRunner();
++    setActivePluginRegistry(originalRegistry);
++  });
++
++  it("reads published routing rules after a listener retains an older generation", async () => {
++    const listenerRegistry = createEmptyPluginRegistry();
++    const channel = createRuntimeChannel();
++    const resolve = () =>
++      withPluginRuntimeGenerationRegistryScope(listenerRegistry, () =>
++        channel.routing.resolveInboundRoute(event),
++      );
++    for (const sessionId of ["first-publication", "second-publication"]) {
++      const published = createEmptyPluginRegistry();
++      const result = {
++        agentId: "support",
++        sessionKey: "agent:support:verification",
++        expectedSessionId: sessionId,
++      };
++      addTestHook({
++        registry: published,
++        pluginId: "slack-router",
++        hookName: "resolve_inbound_route",
++        handler: (() => result) as PluginHookRegistration["handler"],
++      });
++      setActivePluginRegistry(published);
++      initializeGlobalHookRunner(published);
++      await expect(resolve()).resolves.toEqual(result);
++    }
++  });
++
++  it("returns the first concrete route and preserves its session identity", async () => {
++    const registry = createEmptyPluginRegistry();
++    const result: PluginHookResolveInboundRouteResult = {
++      agentId: "support",
++      sessionKey: "agent:support:slack:channel:C1",
++      expectedSessionId: "session-1",
++      reason: "workspace policy",
++    };
++    addTestHook({
++      registry,
++      pluginId: "slack-router",
++      hookName: "resolve_inbound_route",
++      handler: (() => result) as PluginHookRegistration["handler"],
++    });
++
++    await expect(createHookRunner(registry).runResolveInboundRoute(event, event)).resolves.toEqual(
++      result,
++    );
++  });
++});
+diff --git a/src/plugins/hooks.ts b/src/plugins/hooks.ts
+index d7bf111fb..db83ff6b8 100644
+--- a/src/plugins/hooks.ts
++++ b/src/plugins/hooks.ts
+@@ -1106,6 +1106,17 @@ export function createHookRunner(
+     return result ?? {};
+   }
+ 
++  async function runResolveInboundRoute(
++    event: HookEvent<"resolve_inbound_route">,
++    ctx: HookContext<"resolve_inbound_route">,
++  ): Promise<HookResult<"resolve_inbound_route"> | undefined> {
++    return await runModifyingHook("resolve_inbound_route", event, ctx, {
++      mergeResults: (acc, next) => acc ?? next,
++      shouldStop: () => true,
++      terminalLabel: "route-resolved",
++    });
++  }
++
+   return {
+     runBeforeModelResolve: bindModifyingHook("before_model_resolve", {
+       mergeResults: mergeBeforeModelResolve,
+@@ -1230,6 +1241,7 @@ export function createHookRunner(
+       terminalLabel: "block=true",
+     }),
+     runResolveExecEnv,
++    runResolveInboundRoute,
+     hasHooks: <K extends PluginHookName>(hookName: K, ctx?: Partial<HookContext<K>>): boolean =>
+       registry.typedHooks.some(
+         (hook) =>
+diff --git a/src/plugins/loader-runtime-load.ts b/src/plugins/loader-runtime-load.ts
+index 8431531ce..05050a221 100644
+--- a/src/plugins/loader-runtime-load.ts
++++ b/src/plugins/loader-runtime-load.ts
+@@ -4,6 +4,7 @@ import { createAuthProfileStoreRuntime } from "../agents/auth-profiles/store.js"
+ import { resolveModelRuntimePolicy } from "../agents/model-runtime-policy.js";
+ import { resolveDefaultModelForAgent } from "../agents/model-selection-config.js";
+ import { resolveAllowedModelRefCore } from "../agents/model-selection-resolve.js";
++import { resolveUtilityModelRefForAgent } from "../agents/utility-model.js";
+ import { resolveCompatibleRuntimePluginRegistry } from "./active-runtime-registry.js";
+ import { createPluginCapabilityCatalogContext } from "./capability-catalog-context.js";
+ import { isPluginRegistryLoadInFlight } from "./loader-cache.js";
+@@ -80,6 +81,7 @@ const loaderBindings: NativePluginLoadBindings = Object.freeze({
+       resolveDefaultModelForAgent,
+       resolveAllowedModelRef: resolveAllowedModelRefCore,
+       resolveModelRuntimePolicy,
++      resolveUtilityModelRefForAgent,
+     }));
+   },
+   get capabilityCatalogContext() {
+diff --git a/src/plugins/runtime/runtime-channel.ts b/src/plugins/runtime/runtime-channel.ts
+index 353b9329a..8bee08905 100644
+--- a/src/plugins/runtime/runtime-channel.ts
++++ b/src/plugins/runtime/runtime-channel.ts
+@@ -93,7 +93,9 @@ import {
+ } from "../../plugin-sdk/reply-options.js";
+ import { buildAgentSessionKey, resolveAgentRoute } from "../../routing/resolve-route.js";
+ import { createLazyRuntimeMethod, createLazyRuntimeModule } from "../../shared/lazy-runtime.js";
++import { getGlobalHookRunner } from "../hook-runner-global.js";
+ import { createChannelRuntimeContextRegistry } from "./channel-runtime-contexts.js";
++import { runOutsidePluginRuntimeGenerationScope } from "./generation-scope.js";
+ import type { PluginRuntime } from "./types.js";
+ 
+ // Text and registration helpers must not initialize the agent dispatch graph.
+@@ -127,6 +129,16 @@ const runChannelTurn = createLazyRuntimeMethod(
+ export function createRuntimeChannel(options?: {
+   dispatchReplyFromConfig?: typeof dispatchLowLevelChannelReplyFromConfig;
+ }): PluginRuntime["channel"] {
++  const resolveInboundRoute: PluginRuntime["channel"]["routing"]["resolveInboundRoute"] = async (
++    event,
++  ) =>
++    await runOutsidePluginRuntimeGenerationScope(async () => {
++      const hookRunner = getGlobalHookRunner();
++      if (!hookRunner?.hasHooks("resolve_inbound_route")) {
++        return undefined;
++      }
++      return await hookRunner.runResolveInboundRoute(event, event);
++    });
+   const runInbound = <TRaw, TResult>(
+     params: PublicChannelTurnParams<TRaw, TResult, ChannelTurnDeliveryAdapter>,
+   ): Promise<ChannelTurnResult<TResult>> => {
+@@ -197,8 +209,10 @@ export function createRuntimeChannel(options?: {
+       resolveEnvelopeFormatOptions,
+     },
+     routing: {
++      inboundRouteContractVersion: 1,
+       buildAgentSessionKey,
+       resolveAgentRoute,
++      resolveInboundRoute,
+     },
+     pairing: {
+       buildPairingReply,
+diff --git a/src/plugins/runtime/system-events.ts b/src/plugins/runtime/system-events.ts
+index dff4e22d9..994206ee9 100644
+--- a/src/plugins/runtime/system-events.ts
++++ b/src/plugins/runtime/system-events.ts
+@@ -43,7 +43,7 @@ export const enqueueSystemEventEntryFromSdk = (
+ 
+ export function enqueueRoutedSystemEvent(
+   text: string,
+-  route: { agentId: string; sessionKey: string },
++  route: { agentId: string; sessionKey: string; expectedSessionId?: string },
+   options: Omit<Parameters<typeof events.enqueueSystemEvent>[1], "sessionKey"> = {},
+ ): boolean {
+   if (!route.agentId.trim()) {
+@@ -53,6 +53,7 @@ export function enqueueRoutedSystemEvent(
+     ...options,
+     sessionKey: route.sessionKey,
+     agentId: route.agentId,
++    ...(route.expectedSessionId ? { expectedSessionId: route.expectedSessionId } : {}),
+   });
+ }
+ 
+diff --git a/src/plugins/runtime/types-channel.ts b/src/plugins/runtime/types-channel.ts
+index 0e1685609..7507f7d4c 100644
+--- a/src/plugins/runtime/types-channel.ts
++++ b/src/plugins/runtime/types-channel.ts
+@@ -94,8 +94,14 @@ export type PluginRuntimeChannel = {
+     resolveEnvelopeFormatOptions: typeof import("../../auto-reply/envelope.js").resolveEnvelopeFormatOptions;
+   };
+   routing: {
++    inboundRouteContractVersion: 1;
+     buildAgentSessionKey: typeof import("../../routing/resolve-route.js").buildAgentSessionKey;
+     resolveAgentRoute: typeof import("../../routing/resolve-route.js").resolveAgentRoute;
++    resolveInboundRoute: (
++      event: import("../hook-message.types.js").PluginHookResolveInboundRouteEvent,
++    ) => Promise<
++      import("../hook-message.types.js").PluginHookResolveInboundRouteResult | undefined
++    >;
+   };
+   pairing: {
+     buildPairingReply: typeof import("../../pairing/pairing-messages.js").buildPairingReply;
+diff --git a/src/plugins/runtime/types-core.ts b/src/plugins/runtime/types-core.ts
+index 86f53746b..4637fd1da 100644
+--- a/src/plugins/runtime/types-core.ts
++++ b/src/plugins/runtime/types-core.ts
+@@ -595,6 +595,7 @@ export type PluginRuntimeCore = {
+     /** Read-only model selection; no session mutation or harness execution authority. */
+     resolveDefaultModelForAgent: typeof import("../../agents/model-selection-config.js").resolveDefaultModelForAgent;
+     resolveAllowedModelRef: typeof import("../../agents/model-selection-resolve.js").resolveAllowedModelRefCore;
++    resolveUtilityModelRefForAgent: typeof import("../../agents/utility-model.js").resolveUtilityModelRefForAgent;
+     /** Read authored model/provider runtime policy without projecting runtime availability. */
+     resolveModelRuntimePolicy: typeof import("../../agents/model-runtime-policy.js").resolveModelRuntimePolicy;
+   };

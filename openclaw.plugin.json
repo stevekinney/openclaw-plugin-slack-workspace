@@ -102,6 +102,147 @@
           "type": "string"
         },
         "description": "Channel IDs the bot must never auto-join, e.g. [\"C0123ABCD\"]."
+      },
+      "routing": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "accountId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "directMessages": {
+            "type": "object",
+            "properties": {
+              "defaultTarget": {
+                "type": "object",
+                "required": [
+                  "agentId",
+                  "sessionKey"
+                ],
+                "properties": {
+                  "agentId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  },
+                  "sessionKey": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256
+                  }
+                },
+                "additionalProperties": false
+              },
+              "rules": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "accountId",
+                    "workspaceId",
+                    "userId",
+                    "target"
+                  ],
+                  "properties": {
+                    "accountId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "userId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "channelId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "target": {
+                      "type": "object",
+                      "required": [
+                        "agentId",
+                        "sessionKey"
+                      ],
+                      "properties": {
+                        "agentId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        },
+                        "sessionKey": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "maxItems": 100
+              }
+            },
+            "additionalProperties": false
+          },
+          "semanticReplies": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "windowSeconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 86400
+              },
+              "maximumCandidates": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 63
+              }
+            },
+            "additionalProperties": false
+          },
+          "retention": {
+            "type": "object",
+            "properties": {
+              "messageDays": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 365
+              },
+              "maximumMessages": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10000
+              },
+              "interactionHours": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 168
+              },
+              "maximumInteractions": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2000
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
       }
     },
     "additionalProperties": false
@@ -226,13 +367,21 @@
       "slack_remote_file_remove",
       "slack_remote_file_share",
       "slack_remote_file_info",
-      "slack_remote_file_list"
+      "slack_remote_file_list",
+      "slack_interaction_prepare"
     ]
   },
   "toolMetadata": {
     "slack_identity": {
       "sideEffecting": false,
       "replaySafe": true,
+      "profiles": [
+        "messaging"
+      ]
+    },
+    "slack_interaction_prepare": {
+      "sideEffecting": true,
+      "replaySafe": false,
       "profiles": [
         "messaging"
       ]
