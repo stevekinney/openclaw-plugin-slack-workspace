@@ -1,5 +1,57 @@
 import { Type } from "typebox";
 
+const routingTargetSchema = Type.Object(
+  { agentId: Type.String({ minLength: 1, maxLength: 256 }), sessionKey: Type.String({ minLength: 1, maxLength: 256 }) },
+  { additionalProperties: false },
+);
+const routingRuleSchema = Type.Object(
+  {
+    accountId: Type.String({ minLength: 1, maxLength: 256 }),
+    workspaceId: Type.String({ minLength: 1, maxLength: 256 }),
+    userId: Type.String({ minLength: 1, maxLength: 256 }),
+    channelId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    target: routingTargetSchema,
+  },
+  { additionalProperties: false },
+);
+const routingSchema = Type.Object(
+  {
+    enabled: Type.Optional(Type.Boolean()),
+    accountId: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    directMessages: Type.Optional(
+      Type.Object(
+        {
+          defaultTarget: Type.Optional(routingTargetSchema),
+          rules: Type.Optional(Type.Array(routingRuleSchema, { maxItems: 100 })),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    semanticReplies: Type.Optional(
+      Type.Object(
+        {
+          enabled: Type.Optional(Type.Boolean()),
+          windowSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 86_400 })),
+          maximumCandidates: Type.Optional(Type.Integer({ minimum: 1, maximum: 63 })),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    retention: Type.Optional(
+      Type.Object(
+        {
+          messageDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 365 })),
+          maximumMessages: Type.Optional(Type.Integer({ minimum: 1, maximum: 10_000 })),
+          interactionHours: Type.Optional(Type.Integer({ minimum: 1, maximum: 168 })),
+          maximumInteractions: Type.Optional(Type.Integer({ minimum: 1, maximum: 2_000 })),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+);
+
 const secretRefSchema = Type.Object({
   source: Type.String(),
   provider: Type.Optional(Type.String()),
@@ -37,6 +89,7 @@ export const configSchema = Type.Object(
         description: "Channel IDs the bot must never auto-join, e.g. [\"C0123ABCD\"].",
       }),
     ),
+    routing: Type.Optional(routingSchema),
   },
   // Reject typo'd keys (e.g. `boToken`) at validation time instead of failing
   // later with a confusing "No Slack bot token" error.

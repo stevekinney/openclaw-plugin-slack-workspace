@@ -237,6 +237,7 @@ async function withPermalink<T extends { channelId: string; ts: string }>(
       token,
       { channel: result.channelId, message_ts: result.ts },
       context,
+      true,
     );
     return typeof data.permalink === "string" ? { ...result, permalink: data.permalink } : result;
   } catch (error) {

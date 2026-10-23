@@ -26,6 +26,7 @@ Tools marked † take an optional `channelId`. Inside a Slack conversation, leav
 | `slack_post_rich_text` † | Post prose with real lists, quotes, and code blocks | bot | `chat:write` |
 | `slack_blocks_send` † | Post raw Block Kit blocks | bot | `chat:write` |
 | `slack_blocks_update` † | Replace an existing message's blocks by `ts` | bot | `chat:write` |
+| `slack_interaction_prepare` † | Prepare a bounded modal or external-select interaction | bot | none |
 | `slack_message_get` † | Find messages by the metadata stamped on them and return their `ts` | bot | `channels:history`, `metadata.message:read` |
 | `slack_message_delete` † | Delete a message this bot posted (approval-gated) | bot | `channels:history`, `chat:write` |
 | `slack_post_ephemeral` † | Send one user a message only they can see | bot | `chat:write` |
@@ -172,6 +173,14 @@ Configure the plugin under `plugins.entries.slack-workspace.config` in your Open
           },
           autoJoin: true,
           autoJoinDeny: ["C0123ABCD"],
+          routing: {
+            enabled: true,
+            accountId: "default",
+            directMessages: {
+              defaultTarget: { agentId: "main", sessionKey: "agent:main:slack" },
+              rules: [],
+            },
+          },
         },
       },
     },
@@ -186,6 +195,15 @@ Configure the plugin under `plugins.entries.slack-workspace.config` in your Open
 | `workflowTriggers` | map of name to string or SecretRef | Workflow Builder webhook trigger URLs for `slack_workflow_trigger_run`. See [Workflow triggers](#workflow-triggers). |
 | `autoJoin` | boolean, default `true` | Join a public channel and retry once when a bot-token call fails with `not_in_channel`. See [Channel membership](#channel-membership). |
 | `autoJoinDeny` | array of channel IDs | Channels the bot never auto-joins. |
+| `routing` | object | Opt-in reply routing and interaction ownership. `enabled` defaults to `false`; `accountId` defaults to `"default"`. |
+
+When routing is enabled, `semanticReplies.enabled` defaults to `true`, with a `windowSeconds` of `900` and `maximumCandidates` of `5`. Retention defaults to `messageDays: 30`, `maximumMessages: 10000`, `interactionHours: 24`, and `maximumInteractions: 2000`. `directMessages.defaultTarget` is optional; rules match `accountId`, `workspaceId`, and `userId`, with an optional `channelId`. A channel-specific rule wins over a user rule, followed by the default target. All targets are pinned to their concrete `sessionId`; if that session is archived, reset, replaced, or deleted, the target becomes inactive instead of following a reused session key.
+
+Session liveness uses the SDK's asynchronous exact-session reader with latest-read consistency. It does not require privileged Gateway RPC access. Semantic routing uses the agent's Decision model first. To authorize the Utility fallback, configure `plugins.entries.slack-workspace.llm` with `allowAgentIdOverride: true`, `allowModelOverride: true`, and `allowedModels` plus `allowedCompletionModels` containing the configured Utility model's exact `provider/model` reference. Keep those allowlists aligned with the Utility setting.
+
+Routing requires the companion OpenClaw host routing ABI version 1. Installing the released SDK alone is insufficient—the host must expose the inbound route contract and native interactive handler. Enabling routing without that companion host change fails plugin registration with an actionable error. Leave routing disabled to use the released host.
+
+Keep the companion in the image build rather than applying it only to a running container. The Railway template pins this repository’s routing patch by immutable commit and SHA-256, applies it to the release source, and runs routing regressions before producing an image. An incompatible upgrade must fail the build until the patch is rebased and verified. Select the image’s matched Slack channel with `openclaw plugins install slack`; its persisted bundled path follows subsequent images instead of retaining a separately installed channel archive. See [the routing verification and upgrade record](docs/routing.md).
 
 Each secret can be a plain string or a SecretRef (`{ source, provider?, id }`). Use a SecretRef. `botToken`, `userToken`, and every `workflowTriggers` entry are declared in `configContracts.secretInputs`, so the host resolves the reference before the plugin sees it. If a SecretRef reaches the plugin unresolved, the tool fails and tells you to run `openclaw secrets reload`. A token whose prefix doesn't match its slot, say an `xoxp-` token in `botToken`, logs a warning but still runs.
 
@@ -281,7 +299,7 @@ Slack has no method to edit a scheduled message, so `slack_schedule_reschedule` 
 
 ## Reminders
 
-`slack_remind` is the plugin's reminder tool. Slack's docs for `reminders.add` and `reminders.list` say the reminder methods began retiring in March 2023 and "have become degraded or useless," so the tool doesn't touch them. Instead, it schedules an ordinary message. Pass `userId` to remind a person: the tool calls `conversations.open` to find or open the bot's DM with them, then schedules the reminder there with `chat.scheduleMessage`. Pass `channelId` instead to post the reminder in a channel, which skips the DM step. Set exactly one of the two. `when` takes the same formats and limits as `slack_schedule_message`'s `postAt`: an ISO-8601 datetime with an explicit offset, or Unix seconds, in the future and at most 120 days out. The tool checks `when` before it calls Slack. It uses the bot token with the `im:write` and `chat:write` scopes. The result is `{ channelId, userId?, scheduledMessageId, postAt, postAtIso, note? }`, and because a reminder is just a scheduled message, `slack_scheduled_list` shows it and `slack_scheduled_cancel` cancels it. Each reminder fires once. Each reminder carries Slack's standard notification metadata, `{ event_type: "notification", event_payload: { notification_type: "info", title, urgency: "normal", category: "reminder" } }` (see [message metadata](https://docs.slack.dev/messaging/message-metadata)), so Slack can surface it in the Activity feed. The `title` is the first line of `text`, capped at 150 characters. A message carries only one event type, so reminders use this instead of the `openclaw_card` type the other cards use. If Slack rejects the metadata with a metadata error, the tool schedules the reminder again without it and adds a `note` to the result saying so. Whether reminders actually show up in the Activity feed hasn't been checked against a live workspace yet. For a recurring one, set up an `openclaw automations` job that calls the tool.
+`slack_remind` is the plugin's reminder tool. Slack's docs for `reminders.add` and `reminders.list` say the reminder methods began retiring in March 2023 and "have become degraded or useless," so the tool doesn't touch them. Instead, it schedules an ordinary message. Pass `userId` to remind a person: the tool calls `conversations.open` to find or open the bot's DM with them, then schedules the reminder there with `chat.scheduleMessage`. Pass `channelId` instead to post the reminder in a channel, which skips the DM step. Set exactly one of the two. `when` takes the same formats and limits as `slack_schedule_message`'s `postAt`: an ISO-8601 datetime with an explicit offset, or Unix seconds, in the future and at most 120 days out. The tool checks `when` before it calls Slack. It uses the bot token with the `im:write` and `chat:write` scopes. The result is `{ channelId, userId?, scheduledMessageId, postAt, postAtIso }`, and because a reminder is just a scheduled message, `slack_scheduled_list` shows it and `slack_scheduled_cancel` cancels it. Each reminder fires once. Scheduled messages never carry Slack message metadata—Slack accepts the request but will not post scheduled messages that include metadata. For a recurring one, set up an `openclaw automations` job that calls the tool.
 
 ## Ephemeral messages
 
@@ -315,6 +333,14 @@ Slack deprecates `assistant_view` in February 2027 (see [Migrating to agent mess
 
 To turn a recurring automation's N messages into one card that gets edited each run, have it look up its card with `slack_message_get` and post with `updateTs`. The steps and an example prompt are under "Scheduled-digest recipe" in [`skills/slack-block-kit/SKILL.md`](skills/slack-block-kit/SKILL.md).
 
+## Routing and interactions
+
+Routing is opt-in and runs after the Slack channel has authenticated the sender and isolated the account, workspace, and conversation. The resolver checks an exact reply origin first, then a known thread origin, then bounded semantic candidates, and finally direct-message rules/defaults. A stale explicit origin never gets semantic fallback; it can fall through to a configured direct-message target or ordinary routing. Native approvals remain owned by the host approval path.
+
+Use `slack_interaction_prepare` when a model needs a button to open a modal or an external select to return bounded options. For a modal, pass a Slack view and attach the returned `actionId` to the button. For options, pass up to 100 `{ text: { type: "plain_text", text }, value }` entries and attach the returned `actionId` to the external select. The result is `{ actionId, reference, expiresAt }`. The native host handler opens the modal or answers options synchronously, validates the actor and conversation, and routes submissions to the originating live session. It never exposes trigger IDs, response URLs, or session IDs to the model. Expired controls receive an ephemeral explanation and never fall through to another session.
+
+Proactive scheduled routing uses an opaque footer marker in the message blocks because Slack refuses to post scheduled messages that contain metadata. The marker consumes one block, so routed scheduled messages allow at most 49 content blocks. Keep the marker intact when constructing scheduled messages.
+
 ## Not built on purpose
 
 These gaps are deliberate decisions, not oversights. The reasoning for each lives under "Explicitly out of scope" in [`ROADMAP.md`](https://github.com/stevekinney/openclaw-plugin-slack-workspace/blob/main/ROADMAP.md); read it before proposing any of them.
@@ -324,7 +350,7 @@ These gaps are deliberate decisions, not oversights. The reasoning for each live
 - **Per-message personas (`chat:write.customize`) and dedicated `chat:write.public` or `users:write` features.** They're out of scope for this plugin.
 - **Link unfurling and Work Objects (`chat.unfurl`).** They need a `link_shared` event that this app doesn't subscribe to, relayed from the channel plugin's Socket Mode connection, plus a registered unfurl domain. None of those exist.
 - **Workflow Steps.** Slack retired legacy steps from apps (`workflow.steps:execute`) in September 2024. Modern custom steps (`functions.completeSuccess`) need Socket Mode handlers, and the channel plugin owns this app's only connection.
-- **A modal tool (`views.open`).** It needs a 3-second `trigger_id` from a live interaction. The channel plugin redacts that ID from agent context.
+- **A general `views.open` tool.** Modal creation is available through `slack_interaction_prepare`, which prepares a native button callback and keeps the short-lived trigger inside the host interactive handler. It does not expose a trigger ID to the model or replace native approval controls.
 - **Trigger management (`workflows.triggers.*`).** Those methods only target workflows in this app's own manifest, never Workflow Builder ones. Use `slack_workflow_trigger_run` instead.
 - **Workflow templates and `mcp:connect` tools.** No Web API method uses these scopes.
 - **List discovery.** No Slack method lists the Lists in a workspace. You need the `list_id` already.

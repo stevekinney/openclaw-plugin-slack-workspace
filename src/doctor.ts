@@ -11,6 +11,7 @@ type TokenKind = "bot" | "user";
 export const TOOL_SCOPES: Record<string, { token: TokenKind | "none"; scopes: string[] }> = {
   // auth.test needs no scope.
   slack_identity: { token: "bot", scopes: [] },
+  slack_interaction_prepare: { token: "bot", scopes: [] },
   slack_search: { token: "user", scopes: ["search:read"] },
   // search:read.private, .im, .mpim, .files and .users widen coverage; without them
   // Slack answers missing_scope and the tool falls back to search.messages.

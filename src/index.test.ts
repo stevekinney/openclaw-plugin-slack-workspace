@@ -82,6 +82,7 @@ describe("slack-workspace", () => {
       "slack_remote_file_share",
       "slack_remote_file_info",
       "slack_remote_file_list",
+      "slack_interaction_prepare",
     ]);
   });
 

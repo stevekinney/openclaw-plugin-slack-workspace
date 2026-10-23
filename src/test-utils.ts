@@ -1,5 +1,11 @@
 import { vi } from "vitest";
+import { getSessionEntryAsync } from "openclaw/plugin-sdk/session-store-runtime";
 import entry from "./index.js";
+
+vi.mock("openclaw/plugin-sdk/session-store-runtime", () => ({
+  getSessionEntryAsync: vi.fn(),
+  resolveStorePath: (_store: string | undefined, { agentId }: { agentId: string }) => `/test/agents/${agentId}/sessions.json`,
+}));
 
 /** Obviously fake tokens. Tests must never see a real one. */
 export const TEST_CONFIG = { botToken: "xoxb-test", userToken: "xoxp-test" };
@@ -103,7 +109,14 @@ export function recordingLogger(lines: LogLine[] = []) {
  * The slice of the host's per-turn tool context (`OpenClawPluginToolContext`) the
  * plugin reads. Empty means no active conversation turn, e.g. a cron run.
  */
-export type TurnContext = { messageChannel?: string; nativeChannelId?: string };
+export type TurnContext = {
+  messageChannel?: string;
+  nativeChannelId?: string;
+  agentId?: string;
+  sessionKey?: string;
+  sessionId?: string;
+  requesterSenderId?: string;
+};
 
 /** One `api.on(...)` registration captured from the fake plugin API. */
 export type RegisteredHook = {
@@ -161,4 +174,73 @@ export async function runTool(
   const tool = tools.find((candidate) => candidate.name === name);
   if (!tool) throw new Error(`No registered tool named ${name}.`);
   return (await tool.execute("test-call", params)).details;
+}
+
+/** A persistent fake host used through the actual plugin entry, including routing hooks. */
+export function routingTestHost(
+  routing: Record<string, unknown> = { enabled: true },
+  turn: TurnContext = {
+    messageChannel: "slack", nativeChannelId: "DTEST", agentId: "main",
+    sessionKey: "agent:main:origin", sessionId: "origin-id", requesterSenderId: "UTEST",
+  },
+) {
+  const tools = new Map<string, RegisteredTool>();
+  const hooks = new Map<string, RegisteredHook["handler"]>();
+  const handlers = new Map<string, (context: unknown) => Promise<Record<string, unknown>>>();
+  const namespaces = new Map<string, Map<string, { value: unknown; createdAt: number; expiresAt: number }>>();
+  const sessions = new Map<string, Record<string, unknown>>([
+    ["agent:main:origin", { key: "agent:main:origin", agentId: "main", sessionId: "origin-id" }],
+    ["agent:main:default", { key: "agent:main:default", agentId: "main", sessionId: "default-id" }],
+  ]);
+  const logger = recordingLogger();
+  vi.mocked(getSessionEntryAsync).mockImplementation(async ({ sessionKey }) => structuredClone(sessions.get(sessionKey)) as Awaited<ReturnType<typeof getSessionEntryAsync>>);
+  const api = {
+    pluginConfig: { ...TEST_CONFIG, routing }, config: {}, logger,
+    registerTool: (factory: (context: TurnContext) => RegisteredTool) => {
+      const tool = factory(turn);
+      tools.set(tool.name, tool);
+    },
+    registerCli: () => {},
+    on: (name: string, handler: RegisteredHook["handler"]) => hooks.set(name, handler),
+    registerInteractiveHandler: ({ namespace, handler }: { namespace: string; handler: (context: unknown) => Promise<Record<string, unknown>> }) => handlers.set(namespace, handler),
+    runtime: {
+      channel: { routing: { inboundRouteContractVersion: 1 } },
+      modelConfig: { resolveUtilityModelRefForAgent: () => undefined },
+      gateway: { request: async (_method: string, params: { key: string }) => ({ session: structuredClone(sessions.get(params.key) ?? null) }) },
+      state: {
+        openKeyedStore: ({ namespace, maxEntries, overflowPolicy, defaultTtlMs }: { namespace: string; maxEntries: number; overflowPolicy?: string; defaultTtlMs?: number }) => {
+          const rows = namespaces.get(namespace) ?? new Map();
+          namespaces.set(namespace, rows);
+          const sweep = () => { for (const [key, row] of rows) if (row.expiresAt <= Date.now()) rows.delete(key); };
+          const register = async (key: string, value: unknown, options?: { ttlMs?: number }) => {
+            sweep();
+            if (!rows.has(key) && rows.size >= maxEntries) {
+              if (overflowPolicy === "reject-new") throw new Error("Store capacity reached");
+              rows.delete(rows.keys().next().value!);
+            }
+            rows.set(key, { value: structuredClone(value), createdAt: Date.now(), expiresAt: options?.ttlMs === undefined && defaultTtlMs === undefined ? Infinity : Date.now() + (options?.ttlMs ?? defaultTtlMs ?? 0) });
+          };
+          return {
+            register,
+            registerIfAbsent: async (key: string, value: unknown, options?: { ttlMs?: number }) => { sweep(); if (rows.has(key)) return false; await register(key, value, options); return true; },
+            lookup: async (key: string) => { sweep(); return structuredClone(rows.get(key)?.value); },
+            entries: async () => { sweep(); return [...rows].map(([key, row]) => ({ key, ...structuredClone(row) })); },
+            delete: async (key: string) => rows.delete(key),
+            clear: async () => rows.clear(),
+            consume: async (key: string) => { const value = rows.get(key)?.value; rows.delete(key); return value; },
+          };
+        },
+      },
+    },
+  };
+  const register = () => (entry as unknown as { register: (api: unknown) => void }).register(api);
+  register();
+  return {
+    api, hooks, handlers, sessions, namespaces, logger, register, turn,
+    run: async (name: string, params: Record<string, unknown>) => {
+      const tool = tools.get(name);
+      if (!tool) throw new Error(`Unknown tool ${name}`);
+      return tool.execute("routing-test", params);
+    },
+  };
 }
