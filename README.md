@@ -135,7 +135,7 @@ Tools that read a channel's history (`slack_message_get`, `slack_message_delete`
 
 ## Install
 
-You need OpenClaw 2026.9.5 or later, with the bundled Slack channel plugin already connected to a Slack app. This plugin uses the same app and the same bot token, so anything it posts comes from the bot people already talk to.
+You need OpenClaw 2026.10.5 or later and Node 24.22.1 (or a supported version declared in `package.json`), with the Slack channel plugin already connected to a Slack app. This plugin uses the same app and the same bot token, so anything it posts comes from the bot people already talk to. Ordinary workspace tools work on stock OpenClaw with routing disabled. Session routing additionally requires the companion host contract described in [the routing guide](docs/routing.md); installing this package does not install or patch OpenClaw. See [the 0.2.0 release notes](CHANGELOG.md) for compatibility details.
 
 1. Install the plugin from ClawHub:
 
@@ -386,22 +386,39 @@ If the metadata check fails, run `npm run plugin:build` and commit the updated m
 
 ### Release
 
-`dist/` isn't committed, so publish from a local build rather than straight from the GitHub repo. `npm run ci` builds `dist/` before `clawhub package publish .` reads the folder, and `npm pack` rebuilds it through `prepack`.
+`dist/` isn't committed, so publish a locally built tarball rather than the unbuilt GitHub repository. `npm pack` rebuilds `dist/` through `prepack`. Use Node 24.22.1 from `.node-version`; the artifact checks also pin that runtime inside their Docker hosts.
 
-Release from `main`. First set the new version in both `package.json` and `openclaw.plugin.json` (a test fails if they differ), then commit and push it. Then:
+Release from a clean, reviewed `main`. Update the version in `package.json`, `package-lock.json`, and `openclaw.plugin.json`, and add the compatibility and feature changes to [CHANGELOG.md](CHANGELOG.md). Keep the package peer dependency and `openclaw.compat` requirements aligned with the tested minimum host. Then run the quality gates and pack once:
 
 ```bash
-npm run ci
-npm pack --pack-destination /tmp
-openclaw plugins install npm-pack:/tmp/stevekinney-openclaw-slack-workspace-<version>.tgz --force
-openclaw plugins inspect slack-workspace --runtime --json
-clawhub package publish . --dry-run
-clawhub package publish .
+release_state=$(mktemp -d)
+OPENCLAW_HOME="$release_state" OPENCLAW_STATE_DIR="$release_state/state" OPENCLAW_CONFIG_PATH="$release_state/configuration.json" npm run ci
+release_directory=$(mktemp -d)
+npm pack --pack-destination "$release_directory"
+release_artifact="$release_directory/stevekinney-openclaw-slack-workspace-$(node -p "require('./package.json').version").tgz"
+npm run test:artifact -- --artifact "$release_artifact"
+npm run test:artifact -- --artifact "$release_artifact" --image ghcr.io/openclaw/openclaw:2026.10.5@sha256:f40d1e66fd14d8c5b49c832f4100f83b53fdc01f5108f7db11de38fd0ee6dbe5
+: "${SLACK_COMPANION_IMAGE:?Set the reviewed companion-patched OpenClaw image}"
+npm run test:artifact -- --artifact "$release_artifact" --image "$SLACK_COMPANION_IMAGE" --companion
 ```
 
-The `npm-pack:` install proves the published package's shape and dependencies. It installs into your real OpenClaw state, so do it on a machine where that's fine. After `clawhub package publish .` succeeds, tag the release and push the tag: `git tag v<version> && git push origin v<version>`.
+These checks install the exact tarball through OpenClaw's supported `npm-pack:` installer. Each host uses disposable state, a clean environment, and fake tokens. Network access is blocked during runtime checks and Slack responses are mocked. The stock checks verify ordinary tools with routing disabled and the actionable error for unsupported routing activation. The companion check requires the real host contract and exercises ownership persistence, exact-session replies, interactive routing, and archive fallback using real SDK session and keyed-store APIs. It never substitutes a mock runtime for a missing companion. Reports retain the tarball path and SHA-256. Failures print command diagnostics; native failures also retain their isolated fixture for diagnosis. A host command that cannot settle within five minutes fails the check.
 
-If the repo-local `openclaw` CLI refuses to open your state database because a newer Gateway upgraded its schema, run it with a throwaway state directory: `OPENCLAW_STATE_DIR=$(mktemp -d) npm run ci`. The same prefix works for `npm test` and `npm run plugin:validate`, which also call the CLI. None of these steps need your real state.
+The companion image must be built from the reviewed host source and patch described in [the routing guide](docs/routing.md). It must already exist or be pullable by Docker. The test wraps that image with the pinned Node binary; it does not patch an arbitrary stock host. CI runs the stock checks on the pinned SDK and minimum supported host. Run the companion check as a release gate whenever the plugin, SDK, or companion changes. Artifact checks establish package/runtime behavior; live Slack transport and production readiness need their own deployment verification.
+
+After all gates pass, authenticate the current ClawHub CLI as the `stevekinney` package owner and dry-run the same tarball. Inspect the package version, compatibility, file list, and source attribution before uploading:
+
+```bash
+clawhub login
+clawhub whoami
+release_commit=$(git rev-parse HEAD)
+clawhub package publish "$release_artifact" --family code-plugin --source-repo stevekinney/openclaw-plugin-slack-workspace --source-commit "$release_commit" --dry-run
+clawhub package publish "$release_artifact" --family code-plugin --source-repo stevekinney/openclaw-plugin-slack-workspace --source-commit "$release_commit" --wait
+```
+
+Wait for publication and security checks to finish, verify the published version, then tag and push the release: `git tag v<version> && git push origin v<version>`. Publishing the plugin does not install the companion OpenClaw runtime. Leave routing disabled on hosts without that contract.
+
+Use the isolated `OPENCLAW_HOME`, `OPENCLAW_STATE_DIR`, and `OPENCLAW_CONFIG_PATH` prefix above for CLI-driven quality gates. None of these steps need your real state, configuration, tokens, or a running gateway.
 
 ## License
 

@@ -6,13 +6,18 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Lint workflow
+        run: docker run --rm -v "$PWD:/repository:ro" -w /repository rhysd/actionlint:1.7.7@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 .github/workflows/ci.yml
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
           cache: npm
+      - name: Isolate OpenClaw state
+        run: |
+          printf '%s\n' "OPENCLAW_HOME=$RUNNER_TEMP/slack-plugin-host" "OPENCLAW_STATE_DIR=$RUNNER_TEMP/slack-plugin-host/state" "OPENCLAW_CONFIG_PATH=$RUNNER_TEMP/slack-plugin-host/configuration.json" >> "$GITHUB_ENV"
       - run: npm ci
       - name: Type-check (including tests)
         run: npm run typecheck
@@ -24,3 +29,7 @@ jobs:
         run: npx openclaw plugins validate --entry ./dist/index.js
       - name: Test
         run: npm test
+      - name: Install and exercise the packed artifact on the pinned SDK
+        run: npm run test:artifact
+      - name: Install and exercise the packed artifact on the minimum stock host
+        run: npm run test:artifact -- --image ghcr.io/openclaw/openclaw:2026.10.5@sha256:f40d1e66fd14d8c5b49c832f4100f83b53fdc01f5108f7db11de38fd0ee6dbe5

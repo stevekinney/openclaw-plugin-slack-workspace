@@ -1,6 +1,8 @@
 # Slack session routing
 
-Status: implemented in this plugin with a companion OpenClaw host change. Routing is opt-in. The published OpenClaw 2026.10.6 runtime does not include the required inbound routing contract; enabling routing without contract version 1 fails at registration with an actionable error. Installation and live verification were explicitly authorized on 2026-10-23. The production-matched companion image and both plugin packages are installed, routing is enabled for the private Gowanus DM, and live Slack verification passed. Installation exposed callback namespace, retained-generation, and missing event-channel defects; each was corrected with regression coverage before repeating the live checks.
+Status: implemented in this plugin with a companion OpenClaw host change. Routing is opt-in. Version 0.2.0 requires OpenClaw 2026.10.5 or later, including when routing is disabled, because older advertised hosts lack the imported asynchronous session reader. The stock 2026.10.5 and 2026.10.6 hosts do not include the companion inbound routing contract; enabling routing without contract version 1 fails at registration with an actionable error. Publishing or installing this plugin does not install the companion.
+
+The live verification below records the explicitly authorized installation on 2026-10-23, rather than current production health. That installation enabled routing for the private Gowanus DM and passed live Slack checks after correcting callback namespace, retained-generation, and missing event-channel defects. Revalidate a subsequent deployment before describing it as live-verified.
 
 ## Routing contract
 
@@ -33,6 +35,8 @@ The README and packaged Block Kit skill describe exact configuration and tool us
 Development uses Node 24.22.1 (`.node-version`), OpenClaw SDK 2026.10.6, and Vitest 5.0.5. The npm override selects 12.2.1. The owner accepted the remaining moderate advisory GHSA-rxp7-6hxx-x8q5 in npm's bundled `ip-address`; there was no patched npm release available at implementation time. Auditing remains enabled and the advisory is not suppressed.
 
 Plugin quality gates are `npm run typecheck`, `npm test`, `npm run plugin:check`, and `npm run plugin:validate`, run with `mise exec node@24.22.1 --`. Focused regressions cover configuration rejection, deterministic precedence, absolute expiry/capacity, origin ownership, scheduled recovery and copied-marker rejection, fixed generation pinning, native provenance, classifier fallback/cancellation, and prepared interaction authorization/replay.
+
+The release additionally runs `npm run test:artifact` against one packed tarball on the pinned SDK, the minimum supported stock host, and a reviewed companion image. The [README release procedure](../README.md#release) contains the exact commands. The checks verify packaged documentation and dependencies, actual installation and registration, ordinary tool execution, unsupported-host rejection, and routing with real SDK session and keyed-store persistence. Only Slack HTTP responses and the probe's registration capture are substituted; the host runtime and companion contract are real. Passing artifact checks does not establish live Socket Mode, rendered Block Kit behavior, or production readiness.
 
 All Slack calls in automated repository tests use mocked fetch. The owner separately authorized installation, configuration changes, and live Slack verification in the private Gowanus direct message. Live proof requires the authenticated Slack client for buttons, modal rendering, external options, and submission; API receipts alone do not establish those behaviors.
 
