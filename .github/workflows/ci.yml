@@ -7,16 +7,17 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
-    env:
-      OPENCLAW_HOME: ${{ runner.temp }}/slack-plugin-host
-      OPENCLAW_STATE_DIR: ${{ runner.temp }}/slack-plugin-host/state
-      OPENCLAW_CONFIG_PATH: ${{ runner.temp }}/slack-plugin-host/configuration.json
     steps:
       - uses: actions/checkout@v4
+      - name: Lint workflow
+        run: docker run --rm -v "$PWD:/repository:ro" -w /repository rhysd/actionlint:1.7.7@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9 .github/workflows/ci.yml
       - uses: actions/setup-node@v4
         with:
           node-version-file: .node-version
           cache: npm
+      - name: Isolate OpenClaw state
+        run: |
+          printf '%s\n' "OPENCLAW_HOME=$RUNNER_TEMP/slack-plugin-host" "OPENCLAW_STATE_DIR=$RUNNER_TEMP/slack-plugin-host/state" "OPENCLAW_CONFIG_PATH=$RUNNER_TEMP/slack-plugin-host/configuration.json" >> "$GITHUB_ENV"
       - run: npm ci
       - name: Type-check (including tests)
         run: npm run typecheck
