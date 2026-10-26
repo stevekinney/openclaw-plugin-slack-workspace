@@ -7,6 +7,10 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      OPENCLAW_HOME: ${{ runner.temp }}/slack-plugin-host
+      OPENCLAW_STATE_DIR: ${{ runner.temp }}/slack-plugin-host/state
+      OPENCLAW_CONFIG_PATH: ${{ runner.temp }}/slack-plugin-host/configuration.json
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,3 +28,7 @@ jobs:
         run: npx openclaw plugins validate --entry ./dist/index.js
       - name: Test
         run: npm test
+      - name: Install and exercise the packed artifact on the pinned SDK
+        run: npm run test:artifact
+      - name: Install and exercise the packed artifact on the minimum stock host
+        run: npm run test:artifact -- --image ghcr.io/openclaw/openclaw:2026.10.5@sha256:f40d1e66fd14d8c5b49c832f4100f83b53fdc01f5108f7db11de38fd0ee6dbe5
