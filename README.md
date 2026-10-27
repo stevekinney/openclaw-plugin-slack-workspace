@@ -14,7 +14,7 @@ Tools marked † take an optional `channelId`. Inside a Slack conversation, leav
 |---|---|---|---|
 | `slack_identity` | Report who a token authenticates as and which scopes it holds | bot or user (`tokenKind`) | none |
 | `slack_search` | Keyword search over messages or files as the authorizing user, including their private channels and DMs. Points the agent to `slack_search_context` for questions | **user** | `search:read` |
-| `slack_search_context` | Real-time Search (`assistant.search.context`): messages ranked by meaning, each with its permalink and surrounding messages; optionally files, channels and users. Falls back to `search.messages` (`mode: "legacy"`) when unavailable | **user** | `search:read.public` (plus `search:read.private`, `.im`, `.mpim`, `.files`, `.users` for wider coverage) |
+| `slack_search_context` | Real-time Search (`assistant.search.context`): messages ranked by meaning, each with its permalink and surrounding messages; optionally files, channels and users. Unrestricted message searches fall back to `search.messages` (`mode: "legacy"`) when unavailable; requests with conversation/content filters, time bounds, or a cursor fail without legacy search | **user** | `search:read.public` (plus `search:read.private`, `.im`, `.mpim`, `.files`, `.users` for wider coverage) |
 
 ### Messages and Block Kit
 
@@ -135,7 +135,7 @@ Tools that read a channel's history (`slack_message_get`, `slack_message_delete`
 
 ## Install
 
-You need OpenClaw 2026.10.5 or later and Node 24.22.1 (or a supported version declared in `package.json`), with the Slack channel plugin already connected to a Slack app. This plugin uses the same app and the same bot token, so anything it posts comes from the bot people already talk to. Ordinary workspace tools work on stock OpenClaw with routing disabled. Session routing additionally requires the companion host contract described in [the routing guide](docs/routing.md); installing this package does not install or patch OpenClaw. See [the 0.2.0 release notes](CHANGELOG.md) for compatibility details.
+You need OpenClaw 2026.10.5 or later and Node 24.22.1 (or a supported version declared in `package.json`), with the Slack channel plugin already connected to a Slack app. This plugin uses the same app and the same bot token, so anything it posts comes from the bot people already talk to. Ordinary workspace tools work on stock OpenClaw with routing disabled. Session routing additionally requires the companion host contract described in [the routing guide](docs/routing.md); installing this package does not install or patch OpenClaw. See [the release notes](CHANGELOG.md) for compatibility details.
 
 1. Install the plugin from ClawHub:
 

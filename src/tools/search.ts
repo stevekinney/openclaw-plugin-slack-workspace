@@ -14,7 +14,8 @@ function legacyMessageText(match: Record<string, unknown>): string {
 
 /**
  * Errors that mean Real-time Search is unavailable to this token or workspace, rather
- * than that the query was bad. Each one falls back to the legacy `search.messages`.
+ * than that the query was bad. Unrestricted message searches can fall back to
+ * `search.messages`; requests with unsupported restrictions fail closed.
  */
 const CONTEXT_FALLBACK_ERRORS = new Set([
   "missing_scope",
@@ -182,7 +183,7 @@ export const searchTools = (tool: ToolFactory) => [
     name: "slack_search_context",
     label: "Search Slack by meaning",
     description:
-      "Answer questions like \"what did we decide about X?\" with Slack's Real-time Search (assistant.search.context), as the authorizing user. Ranks messages by meaning, and returns each hit with its permalink and the messages just before and after it. Can also search files, channels and users. Covers public and private channels, group DMs and DMs the user can see. Results are turn-local: use them to answer now and do not store them in memory, notes, canvases, lists or files. Slack allows about 10 calls a minute, so refine one query rather than looping. If Real-time Search is unavailable (missing scope, feature off), falls back to keyword search and returns mode \"legacy\" with the reason.",
+      "Answer questions like \"what did we decide about X?\" with Slack's Real-time Search (assistant.search.context), as the authorizing user. Ranks messages by meaning, and returns each hit with its permalink and the messages just before and after it. Can also search files, channels and users. Covers public and private channels, group DMs and DMs the user can see. Results are turn-local: use them to answer now and do not store them in memory, notes, canvases, lists or files. Slack allows about 10 calls a minute, so refine one query rather than looping. If Real-time Search is unavailable (missing scope, feature off), unrestricted message searches fall back to keyword search and return mode \"legacy\" with the reason. Requests with restricted conversation types, non-message content, time bounds, or a cursor fail without calling legacy search.",
     parameters: Type.Object({
       query: Type.String({
         description: "A natural-language question or keywords, e.g. \"what did we decide about pricing?\".",
@@ -355,6 +356,15 @@ export const searchTools = (tool: ToolFactory) => [
         );
       } catch (error) {
         if (!(error instanceof SlackApiError) || !CONTEXT_FALLBACK_ERRORS.has(error.code)) throw error;
+        const restrictedChannels = channelTypes !== undefined &&
+          ALL_CHANNEL_TYPES.some((channelType) => !channelTypes.includes(channelType));
+        const unsupportedContent = contentTypes?.some((contentType) => contentType !== "messages");
+        if (restrictedChannels || unsupportedContent || after !== undefined || before !== undefined || cursor !== undefined) {
+          throw new Error(
+            `${error.message}; legacy fallback cannot preserve the requested channel types, content types, time bounds, or cursor. No legacy search was performed. Restore Real-time Search access to run this request.`,
+            { cause: error },
+          );
+        }
         let legacy;
         try {
           legacy = await callSlack(

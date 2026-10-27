@@ -199,6 +199,49 @@ describe("slack_search_context", () => {
       { ok: false, error: "assistant_search_context_disabled" },
     ];
 
+    const restrictedRequests = [
+      { name: "public channels only", channelTypes: ["public_channel"] },
+      { name: "private channels only", channelTypes: ["private_channel"] },
+      { name: "direct messages only", channelTypes: ["im", "mpim"] },
+      { name: "channels excluding direct messages", channelTypes: ["public_channel", "private_channel"] },
+      { name: "lower time bound", after: 1758000000 },
+      { name: "zero lower time bound", after: 0 },
+      { name: "upper time bound", before: 1759000000 },
+      { name: "zero upper time bound", before: 0 },
+      { name: "file-only content", contentTypes: ["files"] },
+      { name: "mixed content", contentTypes: ["messages", "files"] },
+      { name: "Real-time Search cursor", cursor: "context-page-2" },
+    ];
+
+    for (const failure of triggers) {
+      it.each(restrictedRequests)(`does not discard $name on ${failure.error}`, async ({ name: _name, ...restriction }) => {
+        await withMockFetch(
+          (call) => call.method === "assistant.search.context" ? failure : legacyResponse,
+          async (calls) => {
+            await expect(runTool("slack_search_context", { query: "restricted search", ...restriction }))
+              .rejects.toThrow(/fallback cannot preserve/i);
+            expect(calls.map((call) => call.method)).toEqual(["assistant.search.context"]);
+          },
+        );
+      });
+    }
+
+    it("allows explicit unrestricted message searches without changing their query or sorting", async () => {
+      await withMockFetch(
+        (call) => call.method === "assistant.search.context" ? triggers[0] : legacyResponse,
+        async (calls) => {
+          const result = await runTool("slack_search_context", {
+            query: "in:#roadmap decision",
+            contentTypes: ["messages"],
+            channelTypes: ["im", "mpim", "private_channel", "public_channel"],
+            sort: "timestamp", sortDir: "asc", limit: 3,
+          });
+          expect(result).toMatchObject({ mode: "legacy" });
+          expect(calls[1].body).toEqual({ query: "in:#roadmap decision", count: "3", sort: "timestamp", sort_dir: "asc" });
+        },
+      );
+    });
+
     it.each(triggers)("on $error, returning mode: legacy", async (failure) => {
       await withMockFetch(
         (call) => (call.method === "assistant.search.context" ? failure : legacyResponse),

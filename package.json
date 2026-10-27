@@ -1,6 +1,6 @@
 {
   "name": "@stevekinney/openclaw-slack-workspace",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "OpenClaw plugin with Slack workspace tools the bundled Slack channel plugin lacks: scheduling, search, structured messages, canvases, bookmarks, channel management, Slack Lists, files, and Workflow Builder triggers.",
   "keywords": [
     "openclaw",
