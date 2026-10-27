@@ -24,6 +24,7 @@ type RoutingStorage = {
 
 type RoutingServices = {
   resolveTarget(target: SessionTarget, expectedSessionId?: string): Promise<RoutingTarget | undefined>;
+  resolveDefaultWorkspaceId(): Promise<string | undefined>;
   classify(candidates: MessageOrigin[], message: string): Promise<MessageOrigin | undefined>;
   now?: () => number;
 };
@@ -107,8 +108,11 @@ export async function resolveMessageRoute(
       const target = await resolveConfigured(userRule.target, services);
       if (target) return { target, reason: "direct-message-rule" };
     }
-    const target = await resolveConfigured(configuration.directMessages.defaultTarget, services);
-    if (target) return { target, reason: "direct-message-default" };
+    if (configuration.directMessages.defaultTarget && message.accountId === configuration.accountId &&
+        message.workspaceId === await services.resolveDefaultWorkspaceId()) {
+      const target = await resolveConfigured(configuration.directMessages.defaultTarget, services);
+      if (target) return { target, reason: "direct-message-default" };
+    }
   }
 
   return { reason: inactiveOrigin ? "inactive-origin" : "normal" };

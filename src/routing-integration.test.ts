@@ -17,8 +17,54 @@ describe("registered Slack routing", () => {
   it("resolves configured targets without trusted-plugin Gateway privileges", async () => {
     const host = routingTestHost({ enabled: true, directMessages: { defaultTarget: { agentId: "main", sessionKey: "agent:main:default" } } });
     host.api.runtime.gateway.request = vi.fn(async () => { throw new Error("Gateway requests are only available to bundled or trusted official plugins"); });
-    expect(await host.hooks.get("resolve_inbound_route")!(incoming, {})).toMatchObject({ expectedSessionId: "default-id" });
+    await withMockFetch(({ method }) => response(method), async () => {
+      expect(await host.hooks.get("resolve_inbound_route")!(incoming, {})).toMatchObject({ expectedSessionId: "default-id" });
+    });
     expect(host.api.runtime.gateway.request).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { accountId: "other-account", workspaceId: "TTEST" },
+    { accountId: "default", workspaceId: "TOTHER" },
+  ])("keeps unmatched DM identity on native routing: $accountId/$workspaceId", async (identity) => {
+    const host = routingTestHost({ enabled: true, directMessages: { defaultTarget: { agentId: "main", sessionKey: "agent:main:default" } } });
+    await withMockFetch(({ method }) => response(method), async () => {
+      expect(await host.hooks.get("resolve_inbound_route")!({ ...incoming, ...identity }, {})).toBeUndefined();
+      expect(host.namespaces.get("slack-routing-targets")?.size).toBe(0);
+    });
+  });
+
+  it("fails closed for a DM default when the token workspace cannot be authenticated", async () => {
+    const host = routingTestHost({ enabled: true, directMessages: { defaultTarget: { agentId: "main", sessionKey: "agent:main:default" } } });
+    await withMockFetch(() => ({ ok: false, error: "invalid_auth" }), async () => {
+      expect(await host.hooks.get("resolve_inbound_route")!(incoming, {})).toBeUndefined();
+      expect(host.namespaces.get("slack-routing-targets")?.size).toBe(0);
+    });
+  });
+
+  it.each([
+    { userId: "UOTHER" },
+    { channelId: "DOTHER" },
+  ])("rejects prepared interaction identity overrides: %j", async (identity) => {
+    const host = routingTestHost();
+    await withMockFetch(({ method }) => response(method), async () => {
+      await expect(host.run("slack_interaction_prepare", { kind: "modal", ...identity, view: { type: "modal", title: { type: "plain_text", text: "Review" }, blocks: [] } })).rejects.toThrow(/must match the trusted/);
+      expect(host.namespaces.get("slack-routing-interactions")?.size).toBe(0);
+    });
+  });
+
+  it.each([
+    { messageChannel: undefined, nativeChannelId: undefined, requesterSenderId: undefined },
+    { messageChannel: "discord", nativeChannelId: "DTEST", requesterSenderId: "UTEST" },
+    { messageChannel: "slack", nativeChannelId: undefined, requesterSenderId: "UTEST" },
+    { messageChannel: "slack", nativeChannelId: "DTEST", requesterSenderId: undefined },
+  ])("requires a trusted Slack turn for interaction preparation: %j", async (context) => {
+    const host = routingTestHost();
+    Object.assign(host.turn, context);
+    await withMockFetch(({ method }) => response(method), async () => {
+      await expect(host.run("slack_interaction_prepare", { kind: "options", channelId: "DTEST", userId: "UTEST", options: [{ text: { type: "plain_text", text: "Alpha" }, value: "a" }] })).rejects.toThrow(/trusted Slack/);
+      expect(host.namespaces.get("slack-routing-interactions")?.size).toBe(0);
+    });
   });
 
   it("records the tool's actual origin and routes an explicit reply back to it", async () => {
@@ -43,10 +89,12 @@ describe("registered Slack routing", () => {
 
   it("pins fixed DM rules across resets and plugin restarts", async () => {
     const host = routingTestHost({ enabled: true, directMessages: { defaultTarget: { agentId: "main", sessionKey: "agent:main:default" } } });
-    expect(await host.hooks.get("resolve_inbound_route")!(incoming, {})).toMatchObject({ expectedSessionId: "default-id" });
-    host.sessions.set("agent:main:default", { key: "agent:main:default", agentId: "main", sessionId: "replacement" });
-    host.register();
-    expect(await host.hooks.get("resolve_inbound_route")!(incoming, {})).toBeUndefined();
+    await withMockFetch(({ method }) => response(method), async () => {
+      expect(await host.hooks.get("resolve_inbound_route")!(incoming, {})).toMatchObject({ expectedSessionId: "default-id" });
+      host.sessions.set("agent:main:default", { key: "agent:main:default", agentId: "main", sessionId: "replacement" });
+      host.register();
+      expect(await host.hooks.get("resolve_inbound_route")!(incoming, {})).toBeUndefined();
+    });
   });
 
   it("preserves origin ownership when another session edits a card", async () => {
@@ -97,6 +145,14 @@ describe("registered Slack routing", () => {
       channelId: "slack", accountId: "default", conversationId: "DTEST", sessionKey: "agent:main:origin",
     });
     expect(await host.hooks.get("resolve_inbound_route")!({ ...incoming, replyToId: "1002.000001" }, {})).toBeUndefined();
+  });
+
+  it("accepts explicit interaction identity only when it matches the trusted turn", async () => {
+    const host = routingTestHost();
+    await withMockFetch(({ method }) => response(method), async () => {
+      const result = await host.run("slack_interaction_prepare", { kind: "options", channelId: "DTEST", userId: "UTEST", options: [{ text: { type: "plain_text", text: "Alpha" }, value: "a" }] });
+      expect(result.details).toMatchObject({ actionId: expect.stringMatching(/^slack-workspace:options:/) });
+    });
   });
 
   it("prepares and handles modal/options callbacks through the registered tool and handler", async () => {

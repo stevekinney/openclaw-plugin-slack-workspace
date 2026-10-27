@@ -4,7 +4,7 @@ import { resolveMessageRoute, type InboundRoutingMessage, type RoutingTarget } f
 import type { SessionTarget } from "./routing-configuration.js";
 import type { MessageOrigin } from "./routing-storage.js";
 
-const configuration = resolveRoutingConfiguration({ enabled: true, directMessages: { defaultTarget: { agentId: "default", sessionKey: "global" }, rules: [
+const configuration = resolveRoutingConfiguration({ enabled: true, accountId: "a", directMessages: { defaultTarget: { agentId: "default", sessionKey: "global" }, rules: [
   { accountId: "a", workspaceId: "w", userId: "u", target: { agentId: "user", sessionKey: "global" } },
   { accountId: "a", workspaceId: "w", userId: "u", channelId: "D1", target: { agentId: "channel", sessionKey: "global" } },
 ] } })!;
@@ -15,7 +15,7 @@ function harness(options: { records?: MessageOrigin[]; resolve?: (target: Sessio
   const resolve = vi.fn(options.resolve ?? (async (target: SessionTarget, expected?: string) => ({ ...target, sessionId: expected ?? `${target.agentId}-session` })));
   return {
     storage: { findMessage: async (_address: unknown, ts: string) => options.records?.find((record) => record.messageTs === ts), recentMessages: async () => options.records ?? [] },
-    services: { resolveTarget: resolve, classify, now: () => options.now ?? 1000 },
+    services: { resolveTarget: resolve, resolveDefaultWorkspaceId: async () => "w", classify, now: () => options.now ?? 1000 },
     resolve,
     classify,
   };
@@ -40,6 +40,22 @@ describe("resolveMessageRoute", () => {
     const h = harness();
     expect(await resolveMessageRoute(message(), configuration, h.storage, h.services)).toMatchObject({ reason: "direct-message-rule", target: { agentId: "channel" } });
     expect(await resolveMessageRoute(message({ isDirect: false }), configuration, h.storage, h.services)).toEqual({ reason: "normal" });
+  });
+
+  it.each([
+    { accountId: "other", workspaceId: "w" },
+    { accountId: "a", workspaceId: "other" },
+  ])("does not resolve the default target outside its identity scope: %j", async (identity) => {
+    const h = harness();
+    expect(await resolveMessageRoute(message({ ...identity, userId: "other" }), configuration, h.storage, h.services)).toEqual({ reason: "normal" });
+    expect(h.resolve).not.toHaveBeenCalled();
+  });
+
+  it("preserves explicit rules for independently named accounts and workspaces", async () => {
+    const h = harness();
+    const external = { ...message(), accountId: "external", workspaceId: "external-workspace" };
+    const scoped = { ...configuration, directMessages: { ...configuration.directMessages, rules: [{ accountId: external.accountId, workspaceId: external.workspaceId, userId: external.userId, target: { agentId: "external", sessionKey: "global" } }] } };
+    expect(await resolveMessageRoute(external, scoped, h.storage, h.services)).toMatchObject({ reason: "direct-message-rule", target: { agentId: "external" } });
   });
 
   it("filters future, expired, unauthorized, duplicate-generation, and cross-address candidates", async () => {

@@ -112,6 +112,7 @@ export function registerRouting(api: OpenClawPluginApi): ToolIntegrations | unde
       isDirect: event.isDirect, replyToTs, threadTs: event.threadId,
     }, event.interaction ? { ...configuration, semanticReplies: { ...configuration.semanticReplies, enabled: false } } : configuration, storage, {
       resolveTarget,
+      resolveDefaultWorkspaceId: async () => (await workspaceFor(resolveToken(tokenConfig), { signal: event.signal }))?.teamId,
       classify: async (candidates, message) => {
         const signal = event.signal ?? new AbortController().signal;
         const utilityModel = api.runtime.modelConfig.resolveUtilityModelRefForAgent({ cfg: api.config, agentId: event.agentId });
@@ -168,9 +169,9 @@ export function registerRouting(api: OpenClawPluginApi): ToolIntegrations | unde
     prepareRequest: outbound.prepare,
     prepareInteraction: async (context, input, config) => {
       const origin = toolOrigin(context);
-      const channelId = input.channelId ?? (context.messageChannel === "slack" ? context.nativeChannelId : undefined);
-      const userId = input.userId ?? (context.messageChannel === "slack" ? context.requesterSenderId : undefined);
-      if (!origin || !channelId || !userId) throw new Error("Preparing an interaction requires an originating session, Slack channelId, and Slack userId.");
+      const channelId = context.messageChannel === "slack" ? context.nativeChannelId : undefined;
+      const userId = context.messageChannel === "slack" ? context.requesterSenderId : undefined;
+      if (!origin || !channelId || !userId) throw new Error("Preparing an interaction requires an originating session and a trusted Slack sender and conversation.");
       const workspace = await workspaceFor(resolveToken(config));
       if (!workspace) throw new Error("Could not establish the Slack workspace for the interaction.");
       return interactions.prepare(input, origin, { accountId: configuration.accountId, workspaceId: workspace.teamId, channelId }, userId);
