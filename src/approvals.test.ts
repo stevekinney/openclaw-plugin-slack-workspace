@@ -104,6 +104,26 @@ const gatedMultiCall: Array<[string, Record<string, unknown>]> = [
 ];
 
 describe("approval registry", () => {
+  it.each(["canvas", "list"])("gates composite %s sharing before any Slack call", async (kind) => {
+    const toolName = `slack_${kind}_from_thread`;
+    const base = { channelId: "C0SOURCE", threadTs: "1726000000.000100", [`${kind}Id`]: "F0PRIVATE" };
+    for (const share of [
+      { channelIds: ["C0OTHER"], accessLevel: "read" },
+      { userIds: ["U0OTHER"], accessLevel: "owner" },
+    ]) {
+      await withMockFetch(() => { throw new Error("Denied sharing must not reach Slack"); }, async (calls) => {
+        const result = await callWithApproval(toolName, { ...base, ...share }, "deny");
+        expect(result.executed).toBe(false);
+        expect(result.approval).toBeDefined();
+        expect(calls).toHaveLength(0);
+      });
+    }
+    expect(approvalFor(toolName, base)).toBeUndefined();
+    expect(approvalFor(toolName, { ...base, userIds: ["U0OTHER"], accessLevel: "write" })).toBeUndefined();
+    expect(approvalFor(toolName, { channelId: "C0SOURCE", threadTs: base.threadTs })).toBeDefined();
+    expect(approvalFor(toolName, { channelId: "C0SOURCE", threadTs: base.threadTs, userIds: ["U0OTHER"], accessLevel: "read" })).toBeUndefined();
+  });
+
   it("covers the destructive tools", () => {
     expect(APPROVAL_RULES.map((rule) => rule.toolName).sort()).toEqual([
       "slack_bookmark_remove",
@@ -111,12 +131,14 @@ describe("approval registry", () => {
       "slack_canvas_access_set",
       "slack_canvas_delete",
       "slack_canvas_edit",
+      "slack_canvas_from_thread",
       "slack_canvas_status_update",
       "slack_channel_archive",
       "slack_channel_kickoff",
       "slack_channel_unarchive",
       "slack_list_access_delete",
       "slack_list_access_set",
+      "slack_list_from_thread",
       "slack_list_item_delete",
       "slack_list_items_delete_multiple",
       "slack_message_delete",

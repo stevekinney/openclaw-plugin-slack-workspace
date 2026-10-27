@@ -1,3 +1,4 @@
+import { describeAccessTargets, isWideReachShare } from "./access.js";
 import { bookmarkApprovals } from "./tools/bookmarks.js";
 import { canvasApprovals } from "./tools/canvases.js";
 import { channelApprovals } from "./tools/channels.js";
@@ -45,8 +46,27 @@ export type ApprovalRequest = {
  */
 export const APPROVAL_TIMEOUT_MS = 600_000;
 
+/** Thread conversion can share an existing object or the newly created object. */
+const threadSharingApprovals: ApprovalRule[] = ["canvas", "list"].map((kind) => ({
+  toolName: `slack_${kind}_from_thread`,
+  check: (params) => {
+    const objectId = params[`${kind}Id`];
+    const hasExplicitTarget = Array.isArray(params.channelIds) && params.channelIds.length > 0 ||
+      Array.isArray(params.userIds) && params.userIds.length > 0;
+    const sharing = (hasExplicitTarget || objectId) ? params : { ...params, channelIds: [params.channelId] };
+    if (!isWideReachShare(sharing)) return undefined;
+    const target = objectId ? `${kind} ${objectId}` : `new ${kind} from channel ${params.channelId}`;
+    return {
+      title: `Share Slack ${kind} widely`,
+      description: `Grant ${params.accessLevel ?? "write"} access to ${target} for ${describeAccessTargets(sharing)}. Revoking access later can't un-show what people already saw.`,
+      target,
+    };
+  },
+}));
+
 /** Every tool call that needs a human's approval before it reaches Slack. */
 export const APPROVAL_RULES: readonly ApprovalRule[] = [
+  ...threadSharingApprovals,
   ...schedulingApprovals,
   ...canvasApprovals,
   ...bookmarkApprovals,

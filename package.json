@@ -61,7 +61,9 @@
     "vitest": "5.0.5"
   },
   "overrides": {
-    "npm": "12.2.1"
+    "npm": "12.2.1",
+    "undici@8": "8.12.3",
+    "zod": "4.6.7"
   },
   "openclaw": {
     "extensions": [
