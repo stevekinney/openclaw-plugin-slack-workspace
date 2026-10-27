@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.1
+
+### Security fixes
+
+- Prevent Real-time Search fallback from discarding conversation-type, content-type, or time restrictions and pagination cursors. If Real-time Search is unavailable, these requests fail without calling legacy search; unrestricted message searches retain the documented fallback.
+
+- Require the existing sharing approvals when converting threads into canvases or Lists, including implicit source-channel sharing and owner access.
+- Restrict the default direct-message target to the configured account and the workspace authenticated by the bot token. An unavailable workspace identity disables that fallback; explicitly scoped rules retain their own account and workspace requirements.
+- Derive prepared-interaction identity from trusted Slack host context and reject caller-supplied identity mismatches.
+- Update development host dependency overrides to Undici 8.12.3 and Zod 4.6.7. The two previously approved npm-bundled advisories remain disclosed in the [routing guide](docs/routing.md#toolchain-and-verification).
+
+OpenClaw compatibility and the opt-in companion requirement remain as documented for 0.2.0.
+
 ## 0.2.0
 
 This release adds opt-in Slack session routing and interaction ownership. Existing workspace tools remain available on stock OpenClaw when routing is disabled.

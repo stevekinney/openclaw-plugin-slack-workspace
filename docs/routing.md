@@ -1,6 +1,6 @@
 # Slack session routing
 
-Status: implemented in this plugin with a companion OpenClaw host change. Routing is opt-in. Version 0.2.0 requires OpenClaw 2026.10.5 or later, including when routing is disabled, because older advertised hosts lack the imported asynchronous session reader. The stock 2026.10.5 and 2026.10.6 hosts do not include the companion inbound routing contract; enabling routing without contract version 1 fails at registration with an actionable error. Publishing or installing this plugin does not install the companion.
+Status: implemented in this plugin with a companion OpenClaw host change. Routing is opt-in. Versions 0.2.x require OpenClaw 2026.10.5 or later, including when routing is disabled, because older advertised hosts lack the imported asynchronous session reader. The stock 2026.10.5 and 2026.10.6 hosts do not include the companion inbound routing contract; enabling routing without contract version 1 fails at registration with an actionable error. Publishing or installing this plugin does not install the companion.
 
 The live verification below records the explicitly authorized installation on 2026-10-23, rather than current production health. That installation enabled routing for the private Gowanus DM and passed live Slack checks after correcting callback namespace, retained-generation, and missing event-channel defects. Revalidate a subsequent deployment before describing it as live-verified.
 
